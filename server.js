@@ -138,6 +138,44 @@ app.delete('/api/notifications/:id', (req, res) => {
   res.status(204).end();
 });
 
+// --- Task Dependencies ---
+
+// Get all dependencies (full map)
+app.get('/api/dependencies', (req, res) => {
+  const rows = db.prepare('SELECT blocker_id, blocked_id FROM task_dependencies').all();
+  res.json(rows);
+});
+
+// Get blockers for a task (what blocks it)
+app.get('/api/tasks/:id/blockers', (req, res) => {
+  const rows = db.prepare(`
+    SELECT t.* FROM tasks t
+    INNER JOIN task_dependencies d ON d.blocker_id = t.id
+    WHERE d.blocked_id = ?
+  `).all(req.params.id);
+  res.json(rows.map(r => ({ ...r, tags: JSON.parse(r.tags) })));
+});
+
+// Add a blocker dependency
+app.post('/api/tasks/:id/blockers', (req, res) => {
+  const { blocker_id } = req.body;
+  const blocked_id = req.params.id;
+  if (!blocker_id) return res.status(400).json({ error: 'blocker_id required' });
+  if (blocker_id === blocked_id) return res.status(400).json({ error: 'A task cannot block itself' });
+  const blockerExists = db.prepare('SELECT id FROM tasks WHERE id = ?').get(blocker_id);
+  const blockedExists = db.prepare('SELECT id FROM tasks WHERE id = ?').get(blocked_id);
+  if (!blockerExists || !blockedExists) return res.status(404).json({ error: 'Task not found' });
+  db.prepare('INSERT OR IGNORE INTO task_dependencies (blocker_id, blocked_id) VALUES (?, ?)').run(blocker_id, blocked_id);
+  res.status(201).json({ blocker_id, blocked_id });
+});
+
+// Remove a blocker dependency
+app.delete('/api/tasks/:id/blockers/:blocker_id', (req, res) => {
+  db.prepare('DELETE FROM task_dependencies WHERE blocker_id = ? AND blocked_id = ?')
+    .run(req.params.blocker_id, req.params.id);
+  res.status(204).end();
+});
+
 app.listen(PORT, () => {
   console.log(`Kanban board running at http://localhost:${PORT}`);
 });
