@@ -1768,9 +1768,23 @@ function matchesSearch(t) {
 
 function highlightText(text, query) {
   if (!query || !text) return esc(text || '');
-  const escaped = esc(text);
-  const q = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  return escaped.replace(new RegExp(q, 'gi'), m => `<mark class="highlight">${m}</mark>`);
+  // Escape the text for safe HTML first, then wrap query matches
+  // We escape the query to use in regex, but match against the raw text
+  const q = query.trim();
+  if (!q) return esc(text);
+  const qEsc = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp(qEsc, 'gi');
+  // Split text on matches, escape each piece, wrap matches
+  const parts = [];
+  let last = 0;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) parts.push(esc(text.slice(last, m.index)));
+    parts.push(`<mark class="highlight">${esc(m[0])}</mark>`);
+    last = re.lastIndex;
+  }
+  if (last < text.length) parts.push(esc(text.slice(last)));
+  return parts.join('');
 }
 
 function render() {
@@ -1863,7 +1877,16 @@ function cardHTML(t, q) {
     isOverdue = due < new Date() && t.column !== 'done';
   }
 
-  return `<div class="card${isOverdue ? ' overdue-card' : ''}" draggable="true" data-id="${t.id}">
+  const blocked = isBlocked(t.id);
+  const activeBlockerIds = getBlockerIds(t.id).filter(bid => { const b = tasks.find(x => x.id === bid); return b && b.column !== 'done'; });
+  const blockedBanner = blocked
+    ? `<div class="card-blocked-banner" onclick="editTask('${t.id}')" title="Click to manage blockers">
+        <span class="lock-icon">🔒</span>
+        Blocked by ${activeBlockerIds.length} card${activeBlockerIds.length !== 1 ? 's' : ''}
+       </div>`
+    : '';
+
+  return `<div class="card${isOverdue ? ' overdue-card' : ''}${blocked ? ' is-blocked' : ''}" draggable="true" data-id="${t.id}">
     <div class="card-priority ${t.priority}"></div>
     <div class="card-actions">
       <button class="card-action-btn" onclick="editTask('${t.id}')" title="Edit">&#9998;</button>
@@ -1871,6 +1894,7 @@ function cardHTML(t, q) {
     </div>
     <div class="card-title">${q ? highlightText(t.title, q) : esc(t.title)}</div>
     ${t.description ? `<div class="card-desc">${q ? highlightText(t.description, q) : esc(t.description)}</div>` : ''}
+    ${blockedBanner}
     ${tags ? `<div class="card-tags">${tags}</div>` : ''}
     ${t.column !== 'done' && t.dueDate ? dueBadgeHTML(t.dueDate) : ''}
     <div class="card-meta">
@@ -1926,17 +1950,101 @@ document.querySelectorAll('.card-list').forEach(list => {
   });
 });
 
-// Filter
+// Filter (header assignee buttons)
 document.querySelectorAll('.filter-btn').forEach(btn => {
   btn.addEventListener('click', () => {
     document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
     activeFilter = btn.dataset.filter;
+    // Sync assignee dropdown if applicable
+    const sel = document.getElementById('filterAssignee');
+    if (sel) {
+      if (btn.dataset.filter === 'all') {
+        sel.value = '';
+        filterAssignee = '';
+      } else {
+        sel.value = btn.dataset.filter;
+        filterAssignee = btn.dataset.filter;
+      }
+    }
     render();
   });
 });
 
+// Search & Filter Bar listeners
+(function() {
+  const searchInput = document.getElementById('searchInput');
+  const searchClear = document.getElementById('searchClear');
+  const filterPriorityEl = document.getElementById('filterPriority');
+  const filterAssigneeEl = document.getElementById('filterAssignee');
+
+  if (searchInput) {
+    searchInput.addEventListener('input', () => {
+      searchQuery = searchInput.value;
+      searchClear.classList.toggle('visible', searchQuery.length > 0);
+      render();
+    });
+  }
+
+  if (searchClear) {
+    searchClear.addEventListener('click', () => {
+      searchInput.value = '';
+      searchQuery = '';
+      searchClear.classList.remove('visible');
+      searchInput.focus();
+      render();
+    });
+  }
+
+  if (filterPriorityEl) {
+    filterPriorityEl.addEventListener('change', () => {
+      filterPriority = filterPriorityEl.value;
+      render();
+    });
+  }
+
+  if (filterAssigneeEl) {
+    filterAssigneeEl.addEventListener('change', () => {
+      filterAssignee = filterAssigneeEl.value;
+      // Sync the header buttons to 'all' if dropdown set to empty
+      if (!filterAssignee) {
+        activeFilter = 'all';
+        document.querySelectorAll('.filter-btn').forEach(b => {
+          b.classList.toggle('active', b.dataset.filter === 'all');
+        });
+      } else {
+        activeFilter = 'all'; // let dropdown take over, clear header btn
+        document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+        document.querySelector('.filter-btn[data-filter="all"]').classList.add('active');
+      }
+      render();
+    });
+  }
+})();
+
+function resetSearch() {
+  searchQuery = '';
+  filterPriority = '';
+  filterAssignee = '';
+  const si = document.getElementById('searchInput');
+  if (si) si.value = '';
+  const sc = document.getElementById('searchClear');
+  if (sc) sc.classList.remove('visible');
+  const fp = document.getElementById('filterPriority');
+  if (fp) fp.value = '';
+  const fa = document.getElementById('filterAssignee');
+  if (fa) fa.value = '';
+  activeFilter = 'all';
+  document.querySelectorAll('.filter-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.filter === 'all');
+  });
+  render();
+}
+
 // Modal
+let activityOpen = false;
+let currentTaskActivity = [];
+
 function openModal(task) {
   document.getElementById('modal').classList.add('open');
   document.getElementById('modalTitle').textContent = task ? 'Edit Task' : 'New Task';
@@ -1948,7 +2056,109 @@ function openModal(task) {
   document.getElementById('fColumn').value = task ? task.column : 'backlog';
   document.getElementById('fDueDate').value = task && task.dueDate ? task.dueDate : '';
   document.getElementById('fTags').value = task ? (task.tags || []).join(', ') : '';
+
+  // Activity section — only for existing tasks
+  const actSection = document.getElementById('activitySection');
+  if (task) {
+    actSection.style.display = '';
+    activityOpen = false;
+    document.getElementById('activityToggle').classList.remove('expanded');
+    document.getElementById('activityBody').classList.remove('open');
+    document.getElementById('commentInput').value = '';
+    currentTaskActivity = [];
+    loadActivity(task.id);
+  } else {
+    actSection.style.display = 'none';
+  }
+
   setTimeout(() => document.getElementById('fTitle').focus(), 100);
+}
+
+async function loadActivity(taskId) {
+  try {
+    const res = await fetch(`/api/tasks/${taskId}/activity`);
+    currentTaskActivity = await res.json();
+    renderActivity();
+  } catch(e) {
+    console.error('Failed to load activity', e);
+  }
+}
+
+function renderActivity() {
+  const list = document.getElementById('activityList');
+  if (!currentTaskActivity.length) {
+    list.innerHTML = '<div class="activity-empty">No activity yet.</div>';
+    return;
+  }
+  list.innerHTML = currentTaskActivity.map(a => {
+    const icon = a.type === 'move' ? '↔' : a.type === 'created' ? '✦' : '💬';
+    const time = formatRelTime(a.createdAt);
+    const deleteBtn = a.type === 'comment'
+      ? `<button class="activity-delete" onclick="deleteComment('${a.id}')" title="Delete">×</button>`
+      : '';
+    return `<div class="activity-item" data-aid="${a.id}">
+      <div class="activity-icon ${esc(a.type)}">${icon}</div>
+      <div class="activity-content">
+        <div class="activity-text">${esc(a.content)}</div>
+        <div class="activity-meta"><span>${esc(a.author)}</span><span>·</span><span>${time}</span></div>
+      </div>
+      ${deleteBtn}
+    </div>`;
+  }).join('');
+  list.scrollTop = list.scrollHeight;
+}
+
+function formatRelTime(iso) {
+  const diff = Date.now() - new Date(iso).getTime();
+  const m = Math.floor(diff / 60000);
+  if (m < 1) return 'just now';
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  const d = Math.floor(h / 24);
+  if (d < 7) return `${d}d ago`;
+  return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+function toggleActivity() {
+  activityOpen = !activityOpen;
+  document.getElementById('activityToggle').classList.toggle('expanded', activityOpen);
+  document.getElementById('activityBody').classList.toggle('open', activityOpen);
+  if (activityOpen) {
+    const list = document.getElementById('activityList');
+    setTimeout(() => { list.scrollTop = list.scrollHeight; }, 50);
+  }
+}
+
+async function submitComment() {
+  const taskId = document.getElementById('taskId').value;
+  const content = document.getElementById('commentInput').value.trim();
+  const author = document.getElementById('commentAuthor').value;
+  if (!content || !taskId) return;
+  try {
+    const res = await fetch(`/api/tasks/${taskId}/comments`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content, author }),
+    });
+    const comment = await res.json();
+    currentTaskActivity.push(comment);
+    renderActivity();
+    document.getElementById('commentInput').value = '';
+  } catch(e) {
+    console.error('Failed to post comment', e);
+  }
+}
+
+async function deleteComment(id) {
+  if (!confirm('Delete this comment?')) return;
+  try {
+    await fetch(`/api/activity/${id}`, { method: 'DELETE' });
+    currentTaskActivity = currentTaskActivity.filter(a => a.id !== id);
+    renderActivity();
+  } catch(e) {
+    console.error('Failed to delete comment', e);
+  }
 }
 
 function closeModal() {
