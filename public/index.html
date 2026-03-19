@@ -2057,6 +2057,16 @@ function openModal(task) {
   document.getElementById('fDueDate').value = task && task.dueDate ? task.dueDate : '';
   document.getElementById('fTags').value = task ? (task.tags || []).join(', ') : '';
 
+  // Dependencies section — only for existing tasks
+  const depSection = document.getElementById('depSection');
+  if (task) {
+    depSection.style.display = '';
+    renderBlockerList(task.id);
+    populateDepSelect(task.id);
+  } else {
+    depSection.style.display = 'none';
+  }
+
   // Activity section — only for existing tasks
   const actSection = document.getElementById('activitySection');
   if (task) {
@@ -2072,6 +2082,59 @@ function openModal(task) {
   }
 
   setTimeout(() => document.getElementById('fTitle').focus(), 100);
+}
+
+function renderBlockerList(taskId) {
+  const blockerIds = getBlockerIds(taskId);
+  const listEl = document.getElementById('blockerList');
+  if (!blockerIds.length) {
+    listEl.innerHTML = '<div class="dep-empty">No blockers set</div>';
+    return;
+  }
+  listEl.innerHTML = blockerIds.map(bid => {
+    const b = tasks.find(t => t.id === bid);
+    if (!b) return '';
+    const isDone = b.column === 'done';
+    const colLabel = COL_LABELS[b.column] || b.column;
+    return `<div class="dep-item">
+      <span class="dep-title" title="${esc(b.title)}">${isDone ? '✅ ' : '🔒 '}${esc(b.title)}</span>
+      <span class="dep-col-badge">${colLabel}</span>
+      <button class="dep-remove" onclick="removeBlocker('${taskId}','${bid}')" title="Remove blocker">&times;</button>
+    </div>`;
+  }).filter(Boolean).join('');
+}
+
+function populateDepSelect(currentTaskId) {
+  const sel = document.getElementById('depSelect');
+  const existingBlockerIds = getBlockerIds(currentTaskId);
+  const options = tasks
+    .filter(t => t.id !== currentTaskId && !existingBlockerIds.includes(t.id))
+    .map(t => `<option value="${t.id}">[${COL_LABELS[t.column] || t.column}] ${esc(t.title)}</option>`)
+    .join('');
+  sel.innerHTML = '<option value="">— select a blocker card —</option>' + options;
+}
+
+async function addBlocker() {
+  const taskId = document.getElementById('taskId').value;
+  const blockerId = document.getElementById('depSelect').value;
+  if (!taskId || !blockerId) return;
+  await fetch(`/api/tasks/${taskId}/blockers`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ blocker_id: blockerId }),
+  });
+  dependencies.push({ blocker_id: blockerId, blocked_id: taskId });
+  renderBlockerList(taskId);
+  populateDepSelect(taskId);
+  render();
+}
+
+async function removeBlocker(taskId, blockerId) {
+  await fetch(`/api/tasks/${taskId}/blockers/${blockerId}`, { method: 'DELETE' });
+  dependencies = dependencies.filter(d => !(d.blocker_id === blockerId && d.blocked_id === taskId));
+  renderBlockerList(taskId);
+  populateDepSelect(taskId);
+  render();
 }
 
 async function loadActivity(taskId) {
