@@ -1,0 +1,9 @@
+node_modules/
+kanban.db
+kanban.db-shm
+kanban.db-wal
+tasks.json
+*.db
+*.db-shm
+*.db-wal
+.DS_Store

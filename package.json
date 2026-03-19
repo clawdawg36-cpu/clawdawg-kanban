@@ -1,0 +1,13 @@
+{
+  "name": "kanban",
+  "version": "1.0.0",
+  "description": "Kanban project board for Mike & ClawDawg",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.8.0",
+    "express": "^4.21.0"
+  }
+}
