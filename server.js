@@ -60,10 +60,15 @@ app.put('/api/tasks/:id', (req, res) => {
 
   // Auto-log column changes
   if (req.body.column && req.body.column !== existing.column) {
+    const now = new Date().toISOString();
     const actId = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
     db.prepare(
       'INSERT INTO card_activity (id, taskId, type, content, author, createdAt) VALUES (?, ?, ?, ?, ?, ?)'
-    ).run(actId, existing.id, 'move', `Moved from ${COL_LABELS[existing.column] || existing.column} → ${COL_LABELS[req.body.column] || req.body.column}`, 'System', new Date().toISOString());
+    ).run(actId, existing.id, 'move', `Moved from ${COL_LABELS[existing.column] || existing.column} → ${COL_LABELS[req.body.column] || req.body.column}`, 'System', now);
+    // Also track in notifications table
+    db.prepare(
+      'INSERT INTO notifications (task_id, task_title, from_col, to_col, changed_by, created_at) VALUES (?, ?, ?, ?, ?, ?)'
+    ).run(existing.id, existing.title, existing.column, req.body.column, updated.assignee || 'System', now);
   }
 
   res.json(updated);
@@ -110,6 +115,26 @@ app.delete('/api/activity/:id', (req, res) => {
   const row = db.prepare('SELECT * FROM card_activity WHERE id = ?').get(req.params.id);
   if (!row || row.type !== 'comment') return res.status(404).json({ error: 'Not found' });
   db.prepare('DELETE FROM card_activity WHERE id = ?').run(req.params.id);
+  res.status(204).end();
+});
+
+// ─── Notifications ────────────────────────────────────────────────────────────
+
+// Get notifications (recent column change events)
+app.get('/api/notifications', (req, res) => {
+  const rows = db.prepare('SELECT * FROM notifications ORDER BY created_at DESC LIMIT 50').all();
+  res.json(rows);
+});
+
+// Mark all notifications as read
+app.post('/api/notifications/read', (req, res) => {
+  db.prepare('UPDATE notifications SET is_read = 1 WHERE is_read = 0').run();
+  res.json({ ok: true });
+});
+
+// Dismiss / delete a notification
+app.delete('/api/notifications/:id', (req, res) => {
+  db.prepare('DELETE FROM notifications WHERE id = ?').run(req.params.id);
   res.status(204).end();
 });
 

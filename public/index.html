@@ -383,8 +383,10 @@ input[type="date"] {
   border: 1px solid var(--border);
   border-radius: 16px;
   padding: 28px;
-  width: 460px;
+  width: 520px;
   max-width: 90vw;
+  max-height: 90vh;
+  overflow-y: auto;
   box-shadow: 0 20px 60px rgba(0,0,0,0.5);
   animation: modalIn 0.25s ease;
 }
@@ -1686,11 +1688,34 @@ input[type="date"] {
       <button class="btn-cancel" onclick="closeModal()">Cancel</button>
       <button class="btn-save" onclick="saveTask()">Save Task</button>
     </div>
+
+    <!-- Activity & Comments (only shown when editing) -->
+    <div class="activity-section" id="activitySection" style="display:none">
+      <button class="activity-toggle" id="activityToggle" onclick="toggleActivity()">
+        <span>💬</span> Activity & Comments
+        <span class="activity-toggle-arrow">▼</span>
+      </button>
+      <div class="activity-body" id="activityBody">
+        <div class="activity-list" id="activityList">
+          <div class="activity-empty">No activity yet.</div>
+        </div>
+        <div class="comment-form">
+          <textarea class="comment-input" id="commentInput" placeholder="Add a comment..." rows="1"
+            onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();submitComment();}"></textarea>
+          <select class="comment-author-select" id="commentAuthor">
+            <option value="Mike">Mike</option>
+            <option value="ClawDawg">ClawDawg</option>
+          </select>
+          <button class="btn-comment" onclick="submitComment()">Post</button>
+        </div>
+      </div>
+    </div>
   </div>
 </div>
 
 <script>
 let tasks = [];
+let dependencies = []; // [{blocker_id, blocked_id}]
 let activeFilter = 'all';
 let activeMobileCol = 'backlog';
 const isMobile = () => window.matchMedia('(max-width: 768px)').matches;
@@ -1702,9 +1727,26 @@ let searchQuery = '';
 let filterPriority = '';
 let filterAssignee = '';
 
+// --- Dependency helpers ---
+function getBlockerIds(taskId) {
+  return dependencies.filter(d => d.blocked_id === taskId).map(d => d.blocker_id);
+}
+function isBlocked(taskId) {
+  const task = tasks.find(t => t.id === taskId);
+  if (!task || task.column === 'done') return false;
+  return getBlockerIds(taskId).some(bid => {
+    const b = tasks.find(t => t.id === bid);
+    return b && b.column !== 'done';
+  });
+}
+
 async function loadTasks() {
-  const res = await fetch('/api/tasks');
-  tasks = await res.json();
+  const [tasksRes, depsRes] = await Promise.all([
+    fetch('/api/tasks'),
+    fetch('/api/dependencies'),
+  ]);
+  tasks = await tasksRes.json();
+  dependencies = await depsRes.json();
   render();
 }
 
@@ -1804,11 +1846,11 @@ function dueBadgeHTML(dueDate) {
   }
 }
 
-function cardHTML(t) {
+function cardHTML(t, q) {
   const date = new Date(t.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   const avatarClass = t.assignee === 'Mike' ? 'mike' : 'clawdawg';
   const initials = t.assignee === 'Mike' ? 'M' : 'CD';
-  const tags = (t.tags || []).map(tag => `<span class="tag">${esc(tag)}</span>`).join('');
+  const tags = (t.tags || []).map(tag => `<span class="tag">${q ? highlightText(tag, q) : esc(tag)}</span>`).join('');
   const moveBtns = COL_ORDER
     .filter((c) => c !== t.column)
     .map(c => `<button class="card-move-btn" onclick="moveTask('${t.id}','${c}')">${COL_LABELS[c]}</button>`)
@@ -1827,8 +1869,8 @@ function cardHTML(t) {
       <button class="card-action-btn" onclick="editTask('${t.id}')" title="Edit">&#9998;</button>
       <button class="card-action-btn delete" onclick="deleteTask('${t.id}')" title="Delete">&times;</button>
     </div>
-    <div class="card-title">${esc(t.title)}</div>
-    ${t.description ? `<div class="card-desc">${esc(t.description)}</div>` : ''}
+    <div class="card-title">${q ? highlightText(t.title, q) : esc(t.title)}</div>
+    ${t.description ? `<div class="card-desc">${q ? highlightText(t.description, q) : esc(t.description)}</div>` : ''}
     ${tags ? `<div class="card-tags">${tags}</div>` : ''}
     ${t.column !== 'done' && t.dueDate ? dueBadgeHTML(t.dueDate) : ''}
     <div class="card-meta">
@@ -1880,6 +1922,7 @@ document.querySelectorAll('.card-list').forEach(list => {
     const task = tasks.find(t => t.id === dragId);
     if (task) task.column = newCol;
     render();
+    loadNotifications();
   });
 });
 
@@ -1957,6 +2000,7 @@ async function saveTask() {
   }
   closeModal();
   render();
+  loadNotifications();
 }
 
 // Close modal on overlay click
