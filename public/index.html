@@ -428,6 +428,311 @@ header {
 .btn-save:hover {
   box-shadow: 0 4px 16px var(--accent-glow);
 }
+
+/* Mobile Column Nav (hidden on desktop) */
+.mobile-col-nav {
+  display: none;
+}
+
+/* FAB (hidden on desktop) */
+.fab {
+  display: none;
+}
+
+/* Mobile card move actions (hidden on desktop) */
+.card-move-actions {
+  display: none;
+}
+
+/* ===== MOBILE STYLES ===== */
+@media (max-width: 768px) {
+  body {
+    overflow-x: hidden;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  /* Header */
+  header {
+    padding: 14px 16px;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .logo h1 { font-size: 17px; }
+  .logo-icon { width: 32px; height: 32px; font-size: 16px; border-radius: 8px; }
+
+  .header-actions {
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+
+  .header-actions .btn-add {
+    display: none; /* replaced by FAB on mobile */
+  }
+
+  .filter-btn {
+    padding: 6px 12px;
+    font-size: 12px;
+  }
+
+  /* Mobile Column Nav */
+  .mobile-col-nav {
+    display: flex;
+    gap: 4px;
+    padding: 12px 16px 0;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+
+  .mobile-col-nav::-webkit-scrollbar { display: none; }
+
+  .mobile-col-tab {
+    flex: 1;
+    min-width: 0;
+    padding: 10px 6px;
+    border: none;
+    background: var(--surface);
+    color: var(--text-dim);
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    cursor: pointer;
+    border-radius: 10px 10px 0 0;
+    transition: var(--transition);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    white-space: nowrap;
+    min-height: 44px;
+  }
+
+  .mobile-col-tab .tab-dot {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .mobile-col-tab[data-tab="backlog"] .tab-dot { background: var(--text-dim); }
+  .mobile-col-tab[data-tab="in-progress"] .tab-dot { background: var(--blue); }
+  .mobile-col-tab[data-tab="in-review"] .tab-dot { background: var(--orange); }
+  .mobile-col-tab[data-tab="done"] .tab-dot { background: var(--green); }
+
+  .mobile-col-tab.active {
+    background: var(--surface2);
+    color: var(--text);
+  }
+
+  .mobile-col-tab .tab-count {
+    font-size: 10px;
+    background: var(--surface2);
+    padding: 1px 6px;
+    border-radius: 8px;
+    font-weight: 500;
+  }
+
+  .mobile-col-tab.active .tab-count {
+    background: var(--accent-glow);
+    color: #a29bfe;
+  }
+
+  /* Board — stack columns, show only active */
+  .board {
+    flex-direction: column;
+    padding: 0 0 80px;
+    gap: 0;
+    min-height: calc(100vh - 140px);
+  }
+
+  .column {
+    display: none;
+    min-width: 0;
+    max-width: 100%;
+    width: 100%;
+    border-radius: 0;
+    border-left: none;
+    border-right: none;
+    border-top: none;
+    flex: none;
+  }
+
+  .column.mobile-active {
+    display: flex;
+    flex: 1;
+  }
+
+  .column-header {
+    display: none; /* info is in the tab nav already */
+  }
+
+  .card-list {
+    padding: 12px 16px;
+    gap: 10px;
+    min-height: 200px;
+  }
+
+  /* Cards */
+  .card {
+    padding: 16px;
+    border-radius: 12px;
+  }
+
+  .card-title {
+    font-size: 15px;
+    padding-right: 60px;
+  }
+
+  .card-desc {
+    font-size: 13px;
+  }
+
+  .card-actions {
+    opacity: 1; /* always visible on mobile */
+  }
+
+  .card-action-btn {
+    width: 32px;
+    height: 32px;
+    font-size: 15px;
+    border-radius: 8px;
+  }
+
+  /* Card move actions for mobile */
+  .card-move-actions {
+    display: flex;
+    gap: 6px;
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid var(--border);
+  }
+
+  .card-move-btn {
+    flex: 1;
+    padding: 8px 6px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text-dim);
+    font-family: inherit;
+    font-size: 11px;
+    font-weight: 500;
+    border-radius: 8px;
+    cursor: pointer;
+    min-height: 44px;
+    transition: var(--transition);
+  }
+
+  .card-move-btn:active {
+    background: var(--accent-glow);
+    border-color: var(--accent);
+    color: #a29bfe;
+  }
+
+  /* FAB */
+  .fab {
+    display: grid;
+    place-items: center;
+    position: fixed;
+    bottom: 24px;
+    right: 20px;
+    width: 56px;
+    height: 56px;
+    border-radius: 16px;
+    border: none;
+    background: linear-gradient(135deg, var(--accent), #a29bfe);
+    color: #fff;
+    font-size: 28px;
+    font-weight: 300;
+    cursor: pointer;
+    box-shadow: 0 4px 20px var(--accent-glow), 0 8px 32px rgba(0,0,0,0.3);
+    z-index: 90;
+    transition: var(--transition);
+  }
+
+  .fab:active {
+    transform: scale(0.92);
+  }
+
+  /* Modal — bottom sheet on mobile */
+  .modal-overlay {
+    align-items: flex-end;
+  }
+
+  .modal-overlay.open {
+    display: flex;
+  }
+
+  .modal {
+    width: 100%;
+    max-width: 100vw;
+    border-radius: 20px 20px 0 0;
+    padding: 24px 20px;
+    max-height: 90vh;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    animation: sheetIn 0.3s ease;
+  }
+
+  @keyframes sheetIn {
+    from { opacity: 0; transform: translateY(100%); }
+    to { opacity: 1; transform: none; }
+  }
+
+  .modal h2 {
+    font-size: 18px;
+    margin-bottom: 18px;
+  }
+
+  .field input, .field textarea, .field select {
+    padding: 12px 14px;
+    font-size: 16px; /* prevents iOS zoom */
+    border-radius: 10px;
+    min-height: 44px;
+  }
+
+  .field label {
+    font-size: 11px;
+    margin-bottom: 6px;
+  }
+
+  .field-row {
+    flex-direction: column;
+    gap: 0;
+  }
+
+  .modal-actions {
+    gap: 10px;
+    margin-top: 16px;
+  }
+
+  .btn-cancel, .btn-save {
+    padding: 14px 20px;
+    font-size: 15px;
+    border-radius: 12px;
+    min-height: 48px;
+    flex: 1;
+    text-align: center;
+  }
+
+  /* Disable drag cursor on mobile */
+  .card {
+    cursor: default;
+  }
+}
+
+/* Small phones (iPhone SE etc) */
+@media (max-width: 375px) {
+  .mobile-col-tab {
+    font-size: 11px;
+    padding: 9px 4px;
+  }
+
+  .card-list {
+    padding: 10px 12px;
+  }
+}
 </style>
 </head>
 <body>
@@ -444,6 +749,13 @@ header {
     <button class="btn-add" onclick="openModal()">+ New Task</button>
   </div>
 </header>
+
+<nav class="mobile-col-nav" id="mobileNav">
+  <button class="mobile-col-tab active" data-tab="backlog"><span class="tab-dot"></span>Backlog<span class="tab-count" data-mcount="backlog">0</span></button>
+  <button class="mobile-col-tab" data-tab="in-progress"><span class="tab-dot"></span>Progress<span class="tab-count" data-mcount="in-progress">0</span></button>
+  <button class="mobile-col-tab" data-tab="in-review"><span class="tab-dot"></span>Review<span class="tab-count" data-mcount="in-review">0</span></button>
+  <button class="mobile-col-tab" data-tab="done"><span class="tab-dot"></span>Done<span class="tab-count" data-mcount="done">0</span></button>
+</nav>
 
 <div class="board">
   <div class="column" data-col="backlog">
@@ -475,6 +787,8 @@ header {
     <div class="card-list" data-col="done"></div>
   </div>
 </div>
+
+<button class="fab" onclick="openModal()" aria-label="Add task">+</button>
 
 <!-- Modal -->
 <div class="modal-overlay" id="modal">
@@ -532,6 +846,10 @@ header {
 <script>
 let tasks = [];
 let activeFilter = 'all';
+let activeMobileCol = 'backlog';
+const isMobile = () => window.matchMedia('(max-width: 768px)').matches;
+const COL_ORDER = ['backlog', 'in-progress', 'in-review', 'done'];
+const COL_LABELS = { 'backlog': 'Backlog', 'in-progress': 'In Progress', 'in-review': 'In Review', 'done': 'Done' };
 
 async function loadTasks() {
   const res = await fetch('/api/tasks');
@@ -543,19 +861,33 @@ function render() {
   const cols = ['backlog', 'in-progress', 'in-review', 'done'];
   cols.forEach(col => {
     const list = document.querySelector(`.card-list[data-col="${col}"]`);
+    const colEl = list.closest('.column');
     const filtered = tasks.filter(t => {
       if (t.column !== col) return false;
       if (activeFilter !== 'all' && t.assignee !== activeFilter) return false;
       return true;
     });
     document.querySelector(`[data-count="${col}"]`).textContent = filtered.length;
+    const mcountEl = document.querySelector(`[data-mcount="${col}"]`);
+    if (mcountEl) mcountEl.textContent = filtered.length;
     list.innerHTML = filtered.map(t => cardHTML(t)).join('');
 
-    // Re-attach drag events
-    list.querySelectorAll('.card').forEach(card => {
-      card.addEventListener('dragstart', onDragStart);
-      card.addEventListener('dragend', onDragEnd);
-    });
+    // Mobile: show/hide columns
+    if (isMobile()) {
+      colEl.classList.toggle('mobile-active', col === activeMobileCol);
+      // Disable draggable on mobile
+      list.querySelectorAll('.card').forEach(card => {
+        card.setAttribute('draggable', 'false');
+      });
+    } else {
+      colEl.classList.remove('mobile-active');
+      // Re-attach drag events on desktop
+      list.querySelectorAll('.card').forEach(card => {
+        card.setAttribute('draggable', 'true');
+        card.addEventListener('dragstart', onDragStart);
+        card.addEventListener('dragend', onDragEnd);
+      });
+    }
   });
 }
 
@@ -564,6 +896,11 @@ function cardHTML(t) {
   const avatarClass = t.assignee === 'Mike' ? 'mike' : 'clawdawg';
   const initials = t.assignee === 'Mike' ? 'M' : 'CD';
   const tags = (t.tags || []).map(tag => `<span class="tag">${esc(tag)}</span>`).join('');
+  const colIdx = COL_ORDER.indexOf(t.column);
+  const moveBtns = COL_ORDER
+    .filter((c, i) => c !== t.column)
+    .map(c => `<button class="card-move-btn" onclick="moveTask('${t.id}','${c}')">${COL_LABELS[c]}</button>`)
+    .join('');
   return `<div class="card" draggable="true" data-id="${t.id}">
     <div class="card-priority ${t.priority}"></div>
     <div class="card-actions">
@@ -577,6 +914,7 @@ function cardHTML(t) {
       <span class="card-assignee"><span class="avatar ${avatarClass}">${initials}</span>${t.assignee}</span>
       <span class="card-date">${date}</span>
     </div>
+    <div class="card-move-actions">${moveBtns}</div>
   </div>`;
 }
 
@@ -706,6 +1044,38 @@ document.getElementById('modal').addEventListener('click', e => {
 // Keyboard shortcuts
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') closeModal();
+});
+
+// Mobile column nav
+document.querySelectorAll('.mobile-col-tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.mobile-col-tab').forEach(t => t.classList.remove('active'));
+    tab.classList.add('active');
+    activeMobileCol = tab.dataset.tab;
+    render();
+  });
+});
+
+// Move task (mobile)
+async function moveTask(id, newCol) {
+  await fetch(`/api/tasks/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ column: newCol }),
+  });
+  const task = tasks.find(t => t.id === id);
+  if (task) task.column = newCol;
+  render();
+}
+
+// Re-render on resize (crossing breakpoint)
+let wasMobile = isMobile();
+window.addEventListener('resize', () => {
+  const nowMobile = isMobile();
+  if (nowMobile !== wasMobile) {
+    wasMobile = nowMobile;
+    render();
+  }
 });
 
 loadTasks();
