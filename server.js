@@ -5,6 +5,8 @@ const db = require('./db');
 const app = express();
 const PORT = 3456;
 
+const COL_LABELS = { 'backlog': 'Backlog', 'in-progress': 'In Progress', 'in-review': 'In Review', 'done': 'Done' };
+
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
@@ -29,6 +31,13 @@ app.post('/api/tasks', (req, res) => {
   db.prepare(
     'INSERT INTO tasks (id, title, description, assignee, priority, tags, "column", createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
   ).run(task.id, task.title, task.description, task.assignee, task.priority, JSON.stringify(task.tags), task.column, task.createdAt);
+
+  // Log card creation
+  const actId = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+  db.prepare(
+    'INSERT INTO card_activity (id, taskId, type, content, author, createdAt) VALUES (?, ?, ?, ?, ?, ?)'
+  ).run(actId, task.id, 'created', `Card created in ${COL_LABELS[task.column] || task.column}`, task.assignee, task.createdAt);
+
   res.status(201).json(task);
 });
 
@@ -49,12 +58,58 @@ app.put('/api/tasks/:id', (req, res) => {
     'UPDATE tasks SET title = ?, description = ?, assignee = ?, priority = ?, tags = ?, "column" = ? WHERE id = ?'
   ).run(updated.title, updated.description, updated.assignee, updated.priority, JSON.stringify(updated.tags), updated.column, updated.id);
 
+  // Auto-log column changes
+  if (req.body.column && req.body.column !== existing.column) {
+    const actId = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+    db.prepare(
+      'INSERT INTO card_activity (id, taskId, type, content, author, createdAt) VALUES (?, ?, ?, ?, ?, ?)'
+    ).run(actId, existing.id, 'move', `Moved from ${COL_LABELS[existing.column] || existing.column} → ${COL_LABELS[req.body.column] || req.body.column}`, 'System', new Date().toISOString());
+  }
+
   res.json(updated);
 });
 
 // Delete task
 app.delete('/api/tasks/:id', (req, res) => {
   db.prepare('DELETE FROM tasks WHERE id = ?').run(req.params.id);
+  res.status(204).end();
+});
+
+// Get activity/comments for a task
+app.get('/api/tasks/:id/activity', (req, res) => {
+  const rows = db.prepare('SELECT * FROM card_activity WHERE taskId = ? ORDER BY createdAt ASC').all(req.params.id);
+  res.json(rows);
+});
+
+// Add a comment to a task
+app.post('/api/tasks/:id/comments', (req, res) => {
+  const task = db.prepare('SELECT id FROM tasks WHERE id = ?').get(req.params.id);
+  if (!task) return res.status(404).json({ error: 'Not found' });
+
+  const content = (req.body.content || '').trim();
+  if (!content) return res.status(400).json({ error: 'Comment cannot be empty' });
+
+  const comment = {
+    id: Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
+    taskId: req.params.id,
+    type: 'comment',
+    content,
+    author: req.body.author || 'Mike',
+    createdAt: new Date().toISOString(),
+  };
+
+  db.prepare(
+    'INSERT INTO card_activity (id, taskId, type, content, author, createdAt) VALUES (?, ?, ?, ?, ?, ?)'
+  ).run(comment.id, comment.taskId, comment.type, comment.content, comment.author, comment.createdAt);
+
+  res.status(201).json(comment);
+});
+
+// Delete a comment
+app.delete('/api/activity/:id', (req, res) => {
+  const row = db.prepare('SELECT * FROM card_activity WHERE id = ?').get(req.params.id);
+  if (!row || row.type !== 'comment') return res.status(404).json({ error: 'Not found' });
+  db.prepare('DELETE FROM card_activity WHERE id = ?').run(req.params.id);
   res.status(204).end();
 });
 
