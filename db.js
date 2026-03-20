@@ -19,6 +19,10 @@ db.exec(`
   )
 `);
 
+// Valid column values: 'idea', 'backlog', 'in-progress', 'in-review', 'done'
+// NOTE: 'idea' is a pre-backlog stage for tasks still being refined.
+// The ClawDawg cron task worker must NEVER pick up tasks in the 'idea' column;
+// only tasks in 'backlog' are eligible for automated processing.
 db.exec(`
   CREATE TABLE IF NOT EXISTS tasks (
     id TEXT PRIMARY KEY,

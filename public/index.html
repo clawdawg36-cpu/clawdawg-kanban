@@ -155,6 +155,7 @@ header {
   border-radius: 50%;
 }
 
+.column[data-col="idea"] .column-dot { background: #a29bfe; }
 .column[data-col="backlog"] .column-dot { background: var(--text-dim); }
 .column[data-col="in-progress"] .column-dot { background: var(--blue); }
 .column[data-col="in-review"] .column-dot { background: var(--orange); }
@@ -948,6 +949,17 @@ input[type="date"] {
   border-color: rgba(225, 112, 85, 0.4);
 }
 
+/* Idea column cards — muted/sketchy WIP style */
+.card.idea-card {
+  border: 1.5px dashed #a29bfe;
+  opacity: 0.82;
+  background: rgba(162, 155, 254, 0.06);
+}
+.card.idea-card .card-title {
+  font-style: italic;
+  color: #b2aaff;
+}
+
 /* Dependencies section in modal */
 .dep-section {
   margin-bottom: 14px;
@@ -1498,6 +1510,7 @@ input[type="date"] {
     flex-shrink: 0;
   }
 
+  .mobile-col-tab[data-tab="idea"] .tab-dot { background: #a29bfe; }
   .mobile-col-tab[data-tab="backlog"] .tab-dot { background: var(--text-dim); }
   .mobile-col-tab[data-tab="in-progress"] .tab-dot { background: var(--blue); }
   .mobile-col-tab[data-tab="in-review"] .tab-dot { background: var(--orange); }
@@ -2287,6 +2300,7 @@ input[type="date"] {
 </div>
 
 <nav class="mobile-col-nav" id="mobileNav">
+  <button class="mobile-col-tab" data-tab="idea"><span class="tab-dot"></span>Idea<span class="tab-count" data-mcount="idea">0</span></button>
   <button class="mobile-col-tab active" data-tab="backlog"><span class="tab-dot"></span>Backlog<span class="tab-count" data-mcount="backlog">0</span></button>
   <button class="mobile-col-tab" data-tab="in-progress"><span class="tab-dot"></span>In Prog<span class="tab-count" data-mcount="in-progress">0</span></button>
   <button class="mobile-col-tab" data-tab="in-review"><span class="tab-dot"></span>Review<span class="tab-count" data-mcount="in-review">0</span></button>
@@ -2294,6 +2308,13 @@ input[type="date"] {
 </nav>
 
 <div class="board">
+  <div class="column" data-col="idea">
+    <div class="column-header">
+      <span class="column-title"><span class="column-dot"></span>Idea</span>
+      <span class="column-count" data-count="idea">0</span>
+    </div>
+    <div class="card-list" data-col="idea"></div>
+  </div>
   <div class="column" data-col="backlog">
     <div class="column-header">
       <span class="column-title"><span class="column-dot"></span>Backlog</span>
@@ -2361,6 +2382,7 @@ input[type="date"] {
       <div class="field">
         <label>Column</label>
         <select id="fColumn">
+          <option value="idea">Idea</option>
           <option value="backlog">Backlog</option>
           <option value="in-progress">In Progress</option>
           <option value="in-review">In Review</option>
@@ -2517,8 +2539,10 @@ let dependencies = []; // [{blocker_id, blocked_id}]
 let activeFilter = 'all';
 let activeMobileCol = 'backlog';
 const isMobile = () => window.matchMedia('(max-width: 768px)').matches;
-const COL_ORDER = ['backlog', 'in-progress', 'in-review', 'done'];
-const COL_LABELS = { 'backlog': 'Backlog', 'in-progress': 'In Progress', 'in-review': 'In Review', 'done': 'Done' };
+const COL_ORDER = ['idea', 'backlog', 'in-progress', 'in-review', 'done'];
+const COL_LABELS = { 'idea': 'Idea', 'backlog': 'Backlog', 'in-progress': 'In Progress', 'in-review': 'In Review', 'done': 'Done' };
+// Columns the ClawDawg cron task worker is allowed to pick up tasks from
+const CRON_ELIGIBLE_COLS = ['backlog'];
 
 // Swimlane priority ordering
 const PRIORITY_ORDER = ['urgent', 'high', 'medium', 'low'];
@@ -2753,7 +2777,7 @@ function cardHTML(t, q) {
     </div>`;
   }
 
-  return `<div class="card${isOverdue ? ' overdue-card' : ''}${blocked ? ' is-blocked' : ''}" draggable="true" data-id="${t.id}">
+  return `<div class="card${isOverdue ? ' overdue-card' : ''}${blocked ? ' is-blocked' : ''}${t.column === 'idea' ? ' idea-card' : ''}" draggable="true" data-id="${t.id}">
     <div class="card-priority ${t.priority}"></div>
     <div class="card-actions">
       <button class="card-action-btn" onclick="editTask('${t.id}')" title="Edit">&#9998;</button>
@@ -3347,12 +3371,14 @@ window.addEventListener('resize', () => {
 // ─── Notifications ────────────────────────────────────────────────────────────
 let notifications = [];
 const COL_COLORS = {
+  'idea': '#a29bfe',
   'backlog': '#8b8fa7',
   'in-progress': '#74b9ff',
   'in-review': '#fdcb6e',
   'done': '#00b894',
 };
 const COL_EMOJI = {
+  'idea': '💡',
   'backlog': '📋',
   'in-progress': '⚡',
   'in-review': '🔍',
@@ -3493,8 +3519,8 @@ async function openStats() {
     `;
 
     // Column counts
-    const colOrder = ['backlog', 'in-progress', 'in-review', 'done'];
-    const colLabels = { 'backlog': '📋 Backlog', 'in-progress': '⚡ In Progress', 'in-review': '🔍 In Review', 'done': '✅ Done' };
+    const colOrder = ['idea', 'backlog', 'in-progress', 'in-review', 'done'];
+    const colLabels = { 'idea': '💡 Idea', 'backlog': '📋 Backlog', 'in-progress': '⚡ In Progress', 'in-review': '🔍 In Review', 'done': '✅ Done' };
     const colRows = colOrder.map(c => {
       const cnt = s.columnCounts[c] || 0;
       return `<div class="stat-row"><span class="stat-label">${colLabels[c] || c}</span><span class="stat-value">${cnt}</span></div>`;
