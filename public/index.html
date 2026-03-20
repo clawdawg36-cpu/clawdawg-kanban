@@ -2093,6 +2093,21 @@ function cardHTML(t, q) {
        </div>`
     : '';
 
+  // Subtask progress indicator
+  let subtaskProgressHTML = '';
+  if (Array.isArray(t.subtasks) && t.subtasks.length > 0) {
+    const total = t.subtasks.length;
+    const done = t.subtasks.filter(s => s.done).length;
+    const allDone = done === total;
+    const pct = Math.round((done / total) * 100);
+    subtaskProgressHTML = `<div class="subtask-progress${allDone ? ' all-done' : ''}">
+      <span>☑</span> ${done}/${total}
+      <span style="flex:1;height:4px;background:var(--border);border-radius:2px;overflow:hidden;margin-left:4px;">
+        <span style="display:block;height:100%;width:${pct}%;background:${allDone ? 'var(--green)' : 'var(--accent)'};border-radius:2px;transition:width 0.3s;"></span>
+      </span>
+    </div>`;
+  }
+
   return `<div class="card${isOverdue ? ' overdue-card' : ''}${blocked ? ' is-blocked' : ''}" draggable="true" data-id="${t.id}">
     <div class="card-priority ${t.priority}"></div>
     <div class="card-actions">
@@ -2105,6 +2120,7 @@ function cardHTML(t, q) {
     ${tags ? `<div class="card-tags">${tags}</div>` : ''}
     ${t.column !== 'done' && t.dueDate ? dueBadgeHTML(t.dueDate) : ''}
     ${t.recurring ? `<div class="recurring-badge">🔄 ${t.recurring}</div>` : ''}
+    ${subtaskProgressHTML}
     <div class="card-meta">
       <span class="card-assignee"><span class="avatar ${avatarClass}">${initials}</span>${t.assignee}</span>
       <span class="card-date">${date}</span>
@@ -2504,6 +2520,7 @@ async function saveTask() {
     dueDate: document.getElementById('fDueDate').value || null,
     tags: tagsRaw ? tagsRaw.split(',').map(s => s.trim()).filter(Boolean) : [],
     recurring: document.getElementById('fRecurring').value || null,
+    subtasks: currentChecklist.length > 0 ? currentChecklist : null,
   };
   if (!data.title) { document.getElementById('fTitle').focus(); return; }
 
@@ -2535,10 +2552,6 @@ document.getElementById('modal').addEventListener('click', e => {
 });
 
 // Keyboard shortcuts
-document.addEventListener('keydown', e => {
-  if (e.key === 'Escape') closeModal();
-});
-
 // Mobile column nav
 document.querySelectorAll('.mobile-col-tab').forEach(tab => {
   tab.addEventListener('click', () => {
