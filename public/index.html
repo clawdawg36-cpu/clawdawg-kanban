@@ -404,6 +404,7 @@ input[type="date"] {
   max-width: 90vw;
   max-height: 90vh;
   overflow-y: auto;
+  overscroll-behavior: contain;
   box-shadow: 0 20px 60px rgba(0,0,0,0.5);
   animation: modalIn 0.25s ease;
 }
@@ -1279,6 +1280,63 @@ input[type="date"] {
 }
 .checklist-add-btn:hover { background: var(--accent); color: #fff; }
 
+/* Attachments section in modal */
+.attachment-section { margin-bottom: 14px; }
+.attachment-section > label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-dim);
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.attachment-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+.attachment-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 13px;
+}
+.attachment-icon { font-size: 18px; flex-shrink: 0; }
+.attachment-meta { flex: 1; min-width: 0; }
+.attachment-name {
+  display: block; font-weight: 500; color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  text-decoration: none;
+}
+.attachment-name:hover { color: var(--accent); text-decoration: underline; }
+.attachment-size { font-size: 11px; color: var(--text-dim); }
+.attachment-remove {
+  border: none; background: transparent; color: var(--text-dim); cursor: pointer;
+  font-size: 16px; line-height: 1; padding: 0 2px; transition: var(--transition);
+  flex-shrink: 0;
+}
+.attachment-remove:hover { color: var(--red); }
+.attachment-upload-row { display: flex; gap: 8px; align-items: center; }
+.attachment-upload-row input[type="file"] {
+  flex: 1; padding: 7px 10px; border-radius: 8px; border: 1px solid var(--border);
+  background: var(--surface2); color: var(--text); font-family: inherit; font-size: 12px;
+  outline: none; cursor: pointer;
+}
+.attachment-upload-row input[type="file"]::file-selector-button {
+  background: var(--accent-glow); color: #a29bfe; border: 1px solid var(--accent);
+  border-radius: 6px; padding: 4px 10px; font-family: inherit; font-size: 12px;
+  font-weight: 600; cursor: pointer; margin-right: 8px;
+}
+.attachment-upload-row input[type="file"]::file-selector-button:hover { background: var(--accent); color: #fff; }
+.attachment-upload-btn {
+  padding: 8px 14px; border-radius: 8px; border: 1px solid var(--accent);
+  background: var(--accent-glow); color: #a29bfe; font-family: inherit; font-size: 12px;
+  font-weight: 600; cursor: pointer; white-space: nowrap; transition: var(--transition);
+}
+.attachment-upload-btn:hover { background: var(--accent); color: #fff; }
+.attachment-empty { color: var(--text-dim); font-size: 12px; font-style: italic; padding: 4px 0; }
+
 /* Stats panel */
 .stats-overlay {
   position: fixed; inset: 0; background: rgba(0,0,0,0.6); backdrop-filter: blur(4px);
@@ -1594,8 +1652,10 @@ input[type="date"] {
     border-radius: 20px 20px 0 0;
     padding: 24px 20px;
     max-height: 90vh;
+    max-height: 90dvh; /* use dynamic viewport height on modern mobile browsers */
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain; /* prevent scroll chaining to background */
     animation: sheetIn 0.3s ease;
   }
 
@@ -1869,6 +1929,17 @@ input[type="date"] {
           <option value="">— select a blocker card —</option>
         </select>
         <button class="dep-add-btn" onclick="addBlocker()">Add</button>
+      </div>
+    </div>
+    <!-- Attachments (only shown when editing an existing task) -->
+    <div class="attachment-section" id="attachmentSection" style="display:none">
+      <label>📎 Attachments</label>
+      <div class="attachment-list" id="attachmentList">
+        <div class="attachment-empty">No attachments yet.</div>
+      </div>
+      <div class="attachment-upload-row">
+        <input type="file" id="attachmentFile" multiple>
+        <button class="attachment-upload-btn" onclick="uploadAttachments()">Upload</button>
       </div>
     </div>
     <div class="modal-actions">
@@ -2327,6 +2398,8 @@ let currentTaskActivity = [];
 
 function openModal(task) {
   document.getElementById('modal').classList.add('open');
+  // Lock body scroll to prevent background board from scrolling
+  document.body.style.overflow = 'hidden';
   document.getElementById('modalTitle').textContent = task ? 'Edit Task' : 'New Task';
   document.getElementById('taskId').value = task ? task.id : '';
   document.getElementById('fTitle').value = task ? task.title : '';
@@ -2512,6 +2585,8 @@ async function deleteComment(id) {
 
 function closeModal() {
   document.getElementById('modal').classList.remove('open');
+  // Restore body scroll
+  document.body.style.overflow = '';
 }
 
 function editTask(id) {
@@ -2568,6 +2643,17 @@ async function saveTask() {
 document.getElementById('modal').addEventListener('click', e => {
   if (e.target === e.currentTarget) closeModal();
 });
+
+// Prevent touch-scroll from bleeding through overlay to the background board
+document.getElementById('modal').addEventListener('touchmove', e => {
+  // Allow scrolling inside the modal sheet itself, but block it on the overlay background
+  const modalSheet = document.querySelector('#modal .modal');
+  if (modalSheet && modalSheet.contains(e.target)) {
+    // Let the modal scroll internally — do nothing
+    return;
+  }
+  e.preventDefault();
+}, { passive: false });
 
 // Keyboard shortcuts
 // Mobile column nav

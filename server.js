@@ -1,6 +1,22 @@
 const express = require('express');
 const path = require('path');
+const fs = require('fs');
+const multer = require('multer');
 const db = require('./db');
+
+// ─── Multer config for file uploads ──────────────────────────────────────────
+const UPLOADS_DIR = path.join(__dirname, 'uploads');
+if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, UPLOADS_DIR),
+  filename: (req, file, cb) => {
+    const unique = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+    const ext = path.extname(file.originalname);
+    cb(null, unique + ext);
+  }
+});
+const upload = multer({ storage, limits: { fileSize: 50 * 1024 * 1024 } }); // 50MB limit
 
 const app = express();
 const PORT = 3456;
@@ -189,6 +205,59 @@ app.post('/api/tasks/:id/blockers', (req, res) => {
 app.delete('/api/tasks/:id/blockers/:blocker_id', (req, res) => {
   db.prepare('DELETE FROM task_dependencies WHERE blocker_id = ? AND blocked_id = ?')
     .run(req.params.blocker_id, req.params.id);
+  res.status(204).end();
+});
+
+// ─── File Attachments ─────────────────────────────────────────────────────────
+
+// Serve uploaded files
+app.use('/uploads', express.static(UPLOADS_DIR));
+
+// GET /api/tasks/:id/attachments — list attachments for a task
+app.get('/api/tasks/:id/attachments', (req, res) => {
+  const rows = db.prepare('SELECT * FROM attachments WHERE task_id = ? ORDER BY uploadedAt ASC').all(req.params.id);
+  res.json(rows);
+});
+
+// POST /api/tasks/:id/attachments — upload a file
+app.post('/api/tasks/:id/attachments', upload.single('file'), (req, res) => {
+  const task = db.prepare('SELECT id FROM tasks WHERE id = ?').get(req.params.id);
+  if (!task) return res.status(404).json({ error: 'Task not found' });
+  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+
+  const attachment = {
+    id: Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
+    task_id: req.params.id,
+    filename: req.file.filename,
+    original_name: req.file.originalname,
+    path: req.file.path,
+    mimetype: req.file.mimetype,
+    size: req.file.size,
+    uploadedAt: new Date().toISOString(),
+  };
+
+  db.prepare(
+    'INSERT INTO attachments (id, task_id, filename, original_name, path, mimetype, size, uploadedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+  ).run(attachment.id, attachment.task_id, attachment.filename, attachment.original_name, attachment.path, attachment.mimetype, attachment.size, attachment.uploadedAt);
+
+  // Log activity
+  const actId = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+  db.prepare(
+    'INSERT INTO card_activity (id, taskId, type, content, author, createdAt) VALUES (?, ?, ?, ?, ?, ?)'
+  ).run(actId, req.params.id, 'attachment', `Attached file: ${req.file.originalname}`, 'System', attachment.uploadedAt);
+
+  res.status(201).json(attachment);
+});
+
+// DELETE /api/attachments/:id — remove an attachment
+app.delete('/api/attachments/:id', (req, res) => {
+  const row = db.prepare('SELECT * FROM attachments WHERE id = ?').get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'Not found' });
+
+  // Delete file from disk
+  try { fs.unlinkSync(row.path); } catch (e) { /* ignore if already gone */ }
+
+  db.prepare('DELETE FROM attachments WHERE id = ?').run(req.params.id);
   res.status(204).end();
 });
 

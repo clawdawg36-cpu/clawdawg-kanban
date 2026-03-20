@@ -79,6 +79,21 @@ if (fs.existsSync(TASKS_JSON)) {
   }
 }
 
+// Attachments table
+db.exec(`
+  CREATE TABLE IF NOT EXISTS attachments (
+    id TEXT PRIMARY KEY,
+    task_id TEXT NOT NULL,
+    filename TEXT NOT NULL,
+    original_name TEXT NOT NULL,
+    path TEXT NOT NULL,
+    mimetype TEXT DEFAULT '',
+    size INTEGER DEFAULT 0,
+    uploadedAt TEXT NOT NULL,
+    FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+  )
+`);
+
 // Notifications table
 db.exec(`
   CREATE TABLE IF NOT EXISTS notifications (
