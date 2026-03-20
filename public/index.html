@@ -2449,12 +2449,15 @@ function isBlocked(taskId) {
 
 async function loadTasks() {
   const [tasksRes, depsRes] = await Promise.all([
-    fetch('/api/tasks'),
+    fetch(`/api/tasks?projectId=${encodeURIComponent(activeProjectId)}`),
     fetch('/api/dependencies'),
   ]);
   tasks = await tasksRes.json();
   dependencies = await depsRes.json();
   render();
+  // Update sidebar count for active project
+  projectTaskCounts[activeProjectId] = tasks.length;
+  if (typeof renderSidebar === 'function') renderSidebar();
 }
 
 function matchesSearch(t) {
@@ -3069,6 +3072,7 @@ async function saveTask() {
     const idx = tasks.findIndex(t => t.id === id);
     if (idx !== -1) tasks[idx] = updated;
   } else {
+    data.projectId = activeProjectId;
     const res = await fetch('/api/tasks', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -3411,12 +3415,32 @@ document.addEventListener('keydown', e => {
 
 // ─── Project Sidebar ──────────────────────────────────────────────────────────
 let projects = [];
-let activeProjectId = localStorage.getItem('activeProjectId') || 'default';
+// Determine active project: URL param > localStorage > default
+let activeProjectId = (function() {
+  const urlParams = new URLSearchParams(window.location.search);
+  const fromUrl = urlParams.get('project');
+  if (fromUrl) return fromUrl;
+  return localStorage.getItem('activeProjectId') || 'default';
+})();
+localStorage.setItem('activeProjectId', activeProjectId);
+// Set URL if not already set
+if (!new URLSearchParams(window.location.search).get('project')) {
+  const url = new URL(window.location);
+  url.searchParams.set('project', activeProjectId);
+  history.replaceState({}, '', url);
+}
 
 async function loadProjects() {
   try {
     const res = await fetch('/api/projects');
     projects = await res.json();
+    // Fetch task counts for each project
+    const countPromises = projects.map(p =>
+      fetch(`/api/tasks?projectId=${encodeURIComponent(p.id)}`).then(r => r.json()).then(tasks => ({ id: p.id, count: tasks.length }))
+    );
+    const counts = await Promise.all(countPromises);
+    projectTaskCounts = {};
+    counts.forEach(c => { projectTaskCounts[c.id] = c.count; });
     renderSidebar();
     updateHeaderTitle();
   } catch (e) {
@@ -3424,8 +3448,10 @@ async function loadProjects() {
   }
 }
 
+let projectTaskCounts = {}; // populated during loadProjects
+
 function getProjectTaskCount(projectId) {
-  return tasks.filter(t => t.projectId === projectId).length;
+  return projectTaskCounts[projectId] || 0;
 }
 
 function renderSidebar() {
@@ -3460,6 +3486,10 @@ function updateHeaderTitle() {
 function switchProject(projectId) {
   activeProjectId = projectId;
   localStorage.setItem('activeProjectId', projectId);
+  // Update URL with project param
+  const url = new URL(window.location);
+  url.searchParams.set('project', projectId);
+  history.pushState({}, '', url);
   renderSidebar();
   updateHeaderTitle();
   loadTasks();
@@ -3609,6 +3639,19 @@ async function deleteProject(id) {
 document.addEventListener('click', e => {
   if (!e.target.closest('.sidebar-project')) {
     document.querySelectorAll('.sidebar-project.show-actions').forEach(el => el.classList.remove('show-actions'));
+  }
+});
+
+// Handle browser back/forward
+window.addEventListener('popstate', () => {
+  const urlParams = new URLSearchParams(window.location.search);
+  const projFromUrl = urlParams.get('project') || 'default';
+  if (projFromUrl !== activeProjectId) {
+    activeProjectId = projFromUrl;
+    localStorage.setItem('activeProjectId', activeProjectId);
+    renderSidebar();
+    updateHeaderTitle();
+    loadTasks();
   }
 });
 
