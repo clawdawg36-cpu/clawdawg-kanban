@@ -2740,15 +2740,21 @@ async function openStats() {
       return `<div class="stat-row"><span class="stat-label">${colLabels[c] || c}</span><span class="stat-value">${cnt}</span></div>`;
     }).join('');
 
+    // Total tasks
+    const totalTasks = Object.values(s.columnCounts).reduce((a, b) => a + b, 0);
+
     // Tasks per assignee
     const assignees = Object.entries(s.totalByAssignee).sort((a, b) => b[1] - a[1]);
     const assigneeRows = assignees.length > 0
-      ? assignees.map(([name, cnt]) => `<div class="stat-row"><span class="stat-label">👤 ${esc(name)}</span><span class="stat-value">${cnt}</span></div>`).join('')
+      ? assignees.map(([name, cnt]) => {
+          const pct = totalTasks > 0 ? Math.round(cnt / totalTasks * 100) : 0;
+          return `<div class="stat-row"><span class="stat-label">👤 ${esc(name)}</span><span class="stat-value">${cnt} <span style="color:var(--text-dim);font-weight:400;font-size:12px">(${pct}%)</span></span></div>`;
+        }).join('')
       : '<div class="stat-row"><span class="stat-label" style="color:var(--text-dim)">No tasks yet</span></div>';
 
     detEl.innerHTML = `
       <div class="stat-group">
-        <h3>Tasks by Column</h3>
+        <h3>Tasks by Column <span style="font-weight:400;color:var(--text-dim)">(${totalTasks} total)</span></h3>
         ${colRows}
       </div>
       <div class="stat-group">
