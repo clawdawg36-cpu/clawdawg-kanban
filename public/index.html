@@ -2440,6 +2440,16 @@ function openModal(task) {
     actSection.style.display = 'none';
   }
 
+  // Attachments section — only for existing tasks
+  const attachSection = document.getElementById('attachmentSection');
+  if (task) {
+    attachSection.style.display = '';
+    document.getElementById('attachmentFile').value = '';
+    loadAttachments(task.id);
+  } else {
+    attachSection.style.display = 'none';
+  }
+
   setTimeout(() => document.getElementById('fTitle').focus(), 100);
 }
 
@@ -2637,6 +2647,93 @@ async function saveTask() {
   closeModal();
   render();
   loadNotifications();
+}
+
+// ─── Attachments ──────────────────────────────────────────────────────────────
+
+async function loadAttachments(taskId) {
+  const listEl = document.getElementById('attachmentList');
+  try {
+    const res = await fetch(`/api/tasks/${taskId}/attachments`);
+    const attachments = await res.json();
+    renderAttachments(taskId, attachments);
+  } catch (e) {
+    listEl.innerHTML = '<div class="attachment-empty">Could not load attachments.</div>';
+  }
+}
+
+function renderAttachments(taskId, attachments) {
+  const listEl = document.getElementById('attachmentList');
+  if (!attachments.length) {
+    listEl.innerHTML = '<div class="attachment-empty">No attachments yet.</div>';
+    return;
+  }
+  listEl.innerHTML = attachments.map(a => {
+    const icon = getAttachmentIcon(a.mimetype, a.original_name);
+    const sizeStr = formatFileSize(a.size);
+    return `
+      <div class="attachment-item" data-id="${a.id}">
+        <span class="attachment-icon">${icon}</span>
+        <div class="attachment-meta">
+          <a class="attachment-name" href="/uploads/${a.filename}" target="_blank" download="${a.original_name}" title="${a.original_name}">${a.original_name}</a>
+          <span class="attachment-size">${sizeStr} · ${new Date(a.uploadedAt).toLocaleDateString()}</span>
+        </div>
+        <button class="attachment-remove" onclick="deleteAttachment('${a.id}', '${taskId}')" title="Remove">✕</button>
+      </div>`;
+  }).join('');
+}
+
+function getAttachmentIcon(mimetype, filename) {
+  if (!mimetype) mimetype = '';
+  if (mimetype.startsWith('image/')) return '🖼️';
+  if (mimetype === 'application/pdf') return '📄';
+  if (mimetype.startsWith('video/')) return '🎬';
+  if (mimetype.startsWith('audio/')) return '🎵';
+  if (mimetype.includes('spreadsheet') || filename.match(/\.(xlsx?|csv)$/i)) return '📊';
+  if (mimetype.includes('presentation') || filename.match(/\.(pptx?)$/i)) return '📑';
+  if (mimetype.includes('word') || filename.match(/\.(docx?)$/i)) return '📝';
+  if (mimetype.includes('zip') || mimetype.includes('tar') || filename.match(/\.(zip|tar|gz|rar)$/i)) return '🗜️';
+  return '📎';
+}
+
+function formatFileSize(bytes) {
+  if (!bytes) return '0 B';
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+}
+
+async function uploadAttachments() {
+  const taskId = document.getElementById('taskId').value;
+  if (!taskId) return;
+  const fileInput = document.getElementById('attachmentFile');
+  if (!fileInput.files.length) { alert('Please select a file to upload.'); return; }
+
+  const btn = document.querySelector('.attachment-upload-btn');
+  btn.textContent = 'Uploading…';
+  btn.disabled = true;
+
+  try {
+    for (const file of fileInput.files) {
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await fetch(`/api/tasks/${taskId}/attachments`, { method: 'POST', body: formData });
+      if (!res.ok) throw new Error(await res.text());
+    }
+    fileInput.value = '';
+    await loadAttachments(taskId);
+  } catch (e) {
+    alert('Upload failed: ' + e.message);
+  } finally {
+    btn.textContent = 'Upload';
+    btn.disabled = false;
+  }
+}
+
+async function deleteAttachment(attachmentId, taskId) {
+  if (!confirm('Remove this attachment?')) return;
+  await fetch(`/api/attachments/${attachmentId}`, { method: 'DELETE' });
+  await loadAttachments(taskId);
 }
 
 // Close modal on overlay click
