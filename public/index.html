@@ -2633,7 +2633,7 @@ function highlightText(text, query) {
 }
 
 function render() {
-  const cols = ['backlog', 'in-progress', 'in-review', 'done'];
+  const cols = ['idea', 'backlog', 'in-progress', 'in-review', 'done'];
   const q = searchQuery.toLowerCase().trim();
   let totalVisible = 0;
   cols.forEach(col => {
