@@ -312,36 +312,45 @@ app.delete('/api/attachments/:id', (req, res) => {
 
 // ─── Stats Dashboard ─────────────────────────────────────────────────────────
 app.get('/api/stats', (req, res) => {
-  // Tasks by assignee
-  const assigneeRows = db.prepare('SELECT assignee, COUNT(*) as cnt FROM tasks GROUP BY assignee').all();
+  // Default to "default" project if no projectId passed (backwards compatible)
+  const projectId = req.query.projectId || 'default';
+
+  // Look up project name for display
+  const project = db.prepare('SELECT name FROM projects WHERE id = ?').get(projectId);
+  const projectName = project ? project.name : projectId;
+
+  // Tasks by assignee (scoped to project)
+  const assigneeRows = db.prepare('SELECT assignee, COUNT(*) as cnt FROM tasks WHERE projectId = ? GROUP BY assignee').all(projectId);
   const totalByAssignee = {};
   assigneeRows.forEach(r => { totalByAssignee[r.assignee] = r.cnt; });
 
-  // Column counts
-  const colRows = db.prepare('SELECT "column", COUNT(*) as cnt FROM tasks GROUP BY "column"').all();
+  // Column counts (scoped to project)
+  const colRows = db.prepare('SELECT "column", COUNT(*) as cnt FROM tasks WHERE projectId = ? GROUP BY "column"').all(projectId);
   const columnCounts = {};
   colRows.forEach(r => { columnCounts[r.column] = r.cnt; });
 
-  // Completed this week (tasks moved to done in last 7 days via card_activity)
+  // Completed this week (tasks moved to done in last 7 days via card_activity, scoped to project)
   const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
   const completedThisWeek = db.prepare(
-    `SELECT COUNT(DISTINCT taskId) as cnt FROM card_activity WHERE type = 'move' AND content LIKE '%→ Done%' AND createdAt >= ?`
-  ).get(weekAgo).cnt;
+    `SELECT COUNT(DISTINCT a.taskId) as cnt FROM card_activity a
+     INNER JOIN tasks t ON t.id = a.taskId
+     WHERE a.type = 'move' AND a.content LIKE '%→ Done%' AND a.createdAt >= ? AND t.projectId = ?`
+  ).get(weekAgo, projectId).cnt;
 
-  // Overdue count
+  // Overdue count (scoped to project)
   const now = new Date().toISOString().slice(0, 10);
   const overdueCount = db.prepare(
-    `SELECT COUNT(*) as cnt FROM tasks WHERE dueDate IS NOT NULL AND dueDate < ? AND "column" != 'done'`
-  ).get(now).cnt;
+    `SELECT COUNT(*) as cnt FROM tasks WHERE dueDate IS NOT NULL AND dueDate < ? AND "column" != 'done' AND projectId = ?`
+  ).get(now, projectId).cnt;
 
-  // Average time to complete (seconds from createdAt to move-to-done activity)
+  // Average time to complete (seconds from createdAt to move-to-done activity, scoped to project)
   const completionRows = db.prepare(`
     SELECT t.createdAt as taskCreated, MIN(a.createdAt) as doneAt
     FROM tasks t
     INNER JOIN card_activity a ON a.taskId = t.id AND a.type = 'move' AND a.content LIKE '%→ Done%'
-    WHERE t."column" = 'done'
+    WHERE t."column" = 'done' AND t.projectId = ?
     GROUP BY t.id
-  `).all();
+  `).all(projectId);
   let avgTimeToComplete = 0;
   if (completionRows.length > 0) {
     const totalSec = completionRows.reduce((sum, r) => {
@@ -350,7 +359,7 @@ app.get('/api/stats', (req, res) => {
     avgTimeToComplete = Math.round(totalSec / completionRows.length);
   }
 
-  res.json({ totalByAssignee, completedThisWeek, overdueCount, columnCounts, avgTimeToComplete });
+  res.json({ projectId, projectName, totalByAssignee, completedThisWeek, overdueCount, columnCounts, avgTimeToComplete });
 });
 
 app.listen(PORT, () => {

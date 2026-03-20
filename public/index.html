@@ -2476,7 +2476,7 @@ input[type="date"] {
 <!-- Stats Panel -->
 <div class="stats-overlay" id="statsOverlay" onclick="if(event.target===this)closeStats()">
   <div class="stats-panel">
-    <h2>Board Stats</h2>
+    <h2>Board Stats: <span id="statsProjectName" style="font-weight:400;color:var(--text-dim)"></span></h2>
     <div class="stat-highlights" id="statHighlights"></div>
     <div id="statDetails"></div>
     <button class="stats-close" onclick="closeStats()">Close</button>
@@ -3499,8 +3499,12 @@ async function openStats() {
   detEl.innerHTML = '';
 
   try {
-    const res = await fetch('/api/stats');
+    const res = await fetch(`/api/stats?projectId=${encodeURIComponent(activeProjectId)}`);
     const s = await res.json();
+
+    // Update stats panel header with project name
+    const statsProjectNameEl = document.getElementById('statsProjectName');
+    if (statsProjectNameEl) statsProjectNameEl.textContent = s.projectName || activeProjectId;
 
     // Highlight cards
     hiEl.innerHTML = `
