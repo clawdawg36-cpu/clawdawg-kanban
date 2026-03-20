@@ -2083,6 +2083,97 @@ input[type="date"] {
   box-shadow: 0 0 0 2px var(--accent);
 }
 
+/* Quick Project Switcher (Cmd+K) */
+#quickSwitcher {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.6);
+  backdrop-filter: blur(4px);
+  display: none;
+  justify-content: center;
+  align-items: flex-start;
+  padding-top: 20vh;
+  z-index: 300;
+}
+
+#quickSwitcher.open { display: flex; }
+
+.qs-panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  width: 380px;
+  max-width: 90vw;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+  overflow: hidden;
+  animation: modalIn 0.2s ease;
+}
+
+.qs-input {
+  width: 100%;
+  padding: 14px 16px;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 15px;
+  outline: none;
+}
+
+.qs-input::placeholder { color: var(--text-dim); }
+
+.qs-list {
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.qs-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  cursor: pointer;
+  transition: background var(--transition);
+  font-size: 14px;
+  color: var(--text);
+}
+
+.qs-item:hover, .qs-item.focused {
+  background: var(--accent-glow);
+}
+
+.qs-item .qs-emoji {
+  font-size: 18px;
+  width: 24px;
+  text-align: center;
+}
+
+.qs-item .qs-name {
+  flex: 1;
+}
+
+.qs-item .qs-active-badge {
+  font-size: 10px;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.qs-empty {
+  padding: 20px 16px;
+  text-align: center;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+.qs-hint {
+  padding: 8px 16px;
+  font-size: 11px;
+  color: var(--text-dim);
+  border-top: 1px solid var(--border);
+  text-align: center;
+}
+
 @media (max-width: 768px) {
   #projectSidebar {
     transform: translateX(-220px);
@@ -2373,6 +2464,15 @@ input[type="date"] {
 <!-- Close app-content wrapper -->
 </div>
 
+<!-- Quick Project Switcher -->
+<div id="quickSwitcher" onclick="if(event.target===this)closeQuickSwitcher()">
+  <div class="qs-panel">
+    <input type="text" class="qs-input" id="qsInput" placeholder="Switch project..." autocomplete="off">
+    <div class="qs-list" id="qsList"></div>
+    <div class="qs-hint">↑↓ Navigate · Enter Select · Esc Close</div>
+  </div>
+</div>
+
 <!-- Project Modal -->
 <div id="projectModal" onclick="if(event.target===this)closeProjectModal()">
   <div class="project-modal-content">
@@ -2530,13 +2630,18 @@ function render() {
     });
     list.innerHTML = html;
 
-    // no-results per column
+    // Empty state per column
     let noRes = list.querySelector('.no-results');
     if (!noRes) {
       noRes = document.createElement('div');
       noRes.className = 'no-results';
-      noRes.textContent = 'No matching cards';
       list.appendChild(noRes);
+    }
+    const hasFiltersActive = q || filterPriority || filterAssignee || activeFilter !== 'all';
+    if (filtered.length === 0) {
+      noRes.innerHTML = hasFiltersActive
+        ? 'No matching cards'
+        : '<div style="opacity:0.6;font-size:20px;margin-bottom:6px">📭</div>No tasks yet';
     }
     noRes.classList.toggle('visible', filtered.length === 0);
 
@@ -2555,6 +2660,24 @@ function render() {
       });
     }
   });
+
+  // Live-update sidebar task count for active project
+  if (typeof projectTaskCounts !== 'undefined') {
+    projectTaskCounts[activeProjectId] = tasks.length;
+    if (typeof renderSidebar === 'function') renderSidebar();
+  }
+
+  // Apply project color tint to column headers
+  const activeProj = projects.find(p => p.id === activeProjectId);
+  if (activeProj && activeProj.color) {
+    const hex = activeProj.color.replace('#', '');
+    const r = parseInt(hex.substring(0,2), 16);
+    const g = parseInt(hex.substring(2,4), 16);
+    const b = parseInt(hex.substring(4,6), 16);
+    document.querySelectorAll('.column-header').forEach(h => {
+      h.style.background = `rgba(${r},${g},${b},0.08)`;
+    });
+  }
 
   // Update results info
   const hasFilters = q || filterPriority || filterAssignee || activeFilter !== 'all';
@@ -3641,6 +3764,129 @@ document.addEventListener('click', e => {
     document.querySelectorAll('.sidebar-project.show-actions').forEach(el => el.classList.remove('show-actions'));
   }
 });
+
+// ─── Quick Project Switcher (Cmd+K / Ctrl+K) ─────────────────────────────────
+let qsFocusIndex = 0;
+let qsFilteredProjects = [];
+
+function openQuickSwitcher() {
+  const qs = document.getElementById('quickSwitcher');
+  const input = document.getElementById('qsInput');
+  qs.classList.add('open');
+  input.value = '';
+  qsFocusIndex = 0;
+  renderQuickSwitcher('');
+  setTimeout(() => input.focus(), 50);
+}
+
+function closeQuickSwitcher() {
+  document.getElementById('quickSwitcher').classList.remove('open');
+}
+
+function renderQuickSwitcher(query) {
+  const q = query.toLowerCase().trim();
+  qsFilteredProjects = q
+    ? projects.filter(p => p.name.toLowerCase().includes(q) || (p.emoji && p.emoji.includes(q)))
+    : [...projects];
+  const list = document.getElementById('qsList');
+  if (!qsFilteredProjects.length) {
+    list.innerHTML = '<div class="qs-empty">No projects found</div>';
+    return;
+  }
+  list.innerHTML = qsFilteredProjects.map((p, i) => {
+    const isActive = p.id === activeProjectId;
+    return `<div class="qs-item${i === qsFocusIndex ? ' focused' : ''}" data-idx="${i}" onclick="selectQuickSwitcher(${i})">
+      <span class="qs-emoji">${p.emoji || '📋'}</span>
+      <span class="qs-name">${esc(p.name)}</span>
+      ${isActive ? '<span class="qs-active-badge">current</span>' : ''}
+    </div>`;
+  }).join('');
+}
+
+function selectQuickSwitcher(idx) {
+  const p = qsFilteredProjects[idx];
+  if (p) {
+    closeQuickSwitcher();
+    switchProject(p.id);
+  }
+}
+
+document.getElementById('qsInput').addEventListener('input', e => {
+  qsFocusIndex = 0;
+  renderQuickSwitcher(e.target.value);
+});
+
+document.getElementById('qsInput').addEventListener('keydown', e => {
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    qsFocusIndex = Math.min(qsFocusIndex + 1, qsFilteredProjects.length - 1);
+    renderQuickSwitcher(document.getElementById('qsInput').value);
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    qsFocusIndex = Math.max(qsFocusIndex - 1, 0);
+    renderQuickSwitcher(document.getElementById('qsInput').value);
+  } else if (e.key === 'Enter') {
+    e.preventDefault();
+    selectQuickSwitcher(qsFocusIndex);
+  } else if (e.key === 'Escape') {
+    closeQuickSwitcher();
+  }
+});
+
+// Cmd+K / Ctrl+K listener
+document.addEventListener('keydown', e => {
+  if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+    e.preventDefault();
+    const qs = document.getElementById('quickSwitcher');
+    if (qs.classList.contains('open')) {
+      closeQuickSwitcher();
+    } else {
+      openQuickSwitcher();
+    }
+  }
+  if (e.key === 'Escape') {
+    closeQuickSwitcher();
+  }
+});
+
+// ─── Mobile Swipe Gestures ────────────────────────────────────────────────────
+(function() {
+  let touchStartX = 0;
+  let touchStartY = 0;
+
+  document.addEventListener('touchstart', e => {
+    touchStartX = e.touches[0].clientX;
+    touchStartY = e.touches[0].clientY;
+  }, { passive: true });
+
+  document.addEventListener('touchend', e => {
+    if (!isMobile()) return;
+    const touchEndX = e.changedTouches[0].clientX;
+    const touchEndY = e.changedTouches[0].clientY;
+    const dx = touchEndX - touchStartX;
+    const dy = touchEndY - touchStartY;
+
+    // Only horizontal swipes (ignore vertical scroll gestures)
+    if (Math.abs(dx) < 50 || Math.abs(dy) > Math.abs(dx)) return;
+
+    const sidebar = document.getElementById('projectSidebar');
+    const isSidebarOpen = sidebar.classList.contains('mobile-open');
+
+    if (dx > 0 && !isSidebarOpen) {
+      // Swipe right — open sidebar (only if starting from left edge, within 40px)
+      if (touchStartX < 40) openMobileSidebar();
+    } else if (dx < 0 && isSidebarOpen) {
+      // Swipe left — close sidebar
+      closeMobileSidebar();
+    }
+  }, { passive: true });
+})();
+
+// ─── Live Sidebar Count Updates ───────────────────────────────────────────────
+async function refreshSidebarCounts() {
+  projectTaskCounts[activeProjectId] = tasks.length;
+  renderSidebar();
+}
 
 // Handle browser back/forward
 window.addEventListener('popstate', () => {
