@@ -756,21 +756,22 @@ input[type="date"] {
 .notif-badge.visible { display: grid; }
 
 .notif-dropdown {
-  position: absolute;
-  top: calc(100% + 8px);
-  right: 0;
+  position: fixed;
+  top: 60px;
+  right: 8px;
   left: auto;
   width: 340px;
   max-width: calc(100vw - 16px);
-  max-height: 420px;
+  max-height: 60vh;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 12px;
   box-shadow: 0 16px 48px rgba(0,0,0,0.5);
-  z-index: 200;
+  z-index: 1000;
   display: none;
   flex-direction: column;
   overflow: hidden;
+  overflow-y: auto;
 }
 
 .notif-dropdown.open { display: flex; }
@@ -1653,10 +1654,22 @@ input[type="date"] {
     padding: 24px 20px;
     max-height: 90vh;
     max-height: 90dvh; /* use dynamic viewport height on modern mobile browsers */
+    overflow-x: hidden;
     overflow-y: auto;
-    -webkit-overflow-scrolling: touch;
     overscroll-behavior: contain; /* prevent scroll chaining to background */
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-y; /* vertical touch scrolling only */
+    scrollbar-width: none; /* hide scrollbar Firefox */
     animation: sheetIn 0.3s ease;
+  }
+
+  .modal::-webkit-scrollbar {
+    display: none; /* hide scrollbar WebKit */
+  }
+
+  .modal * {
+    max-width: 100%;
+    overflow-x: hidden;
   }
 
   @keyframes sheetIn {
@@ -1706,14 +1719,15 @@ input[type="date"] {
   }
 }
 
-/* Mobile notification dropdown — keep right-aligned and within viewport */
+/* Mobile notification dropdown — fixed positioning, no clipping */
 @media (max-width: 768px) {
   .notif-dropdown {
-    right: 0;
+    top: 60px;
+    right: 8px;
     left: auto;
-    width: min(340px, calc(100vw - 16px));
-    max-height: min(420px, calc(100dvh - 80px));
-    overflow-y: auto;
+    width: calc(100vw - 16px);
+    max-width: calc(100vw - 16px);
+    max-height: 60vh;
   }
 
   .notif-list {
@@ -2400,6 +2414,7 @@ function openModal(task) {
   document.getElementById('modal').classList.add('open');
   // Lock body scroll to prevent background board from scrolling
   document.body.style.overflow = 'hidden';
+  document.body.style.touchAction = 'none';
   document.getElementById('modalTitle').textContent = task ? 'Edit Task' : 'New Task';
   document.getElementById('taskId').value = task ? task.id : '';
   document.getElementById('fTitle').value = task ? task.title : '';
@@ -2597,6 +2612,7 @@ function closeModal() {
   document.getElementById('modal').classList.remove('open');
   // Restore body scroll
   document.body.style.overflow = '';
+  document.body.style.touchAction = '';
 }
 
 function editTask(id) {
