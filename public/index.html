@@ -758,7 +758,9 @@ input[type="date"] {
   position: absolute;
   top: calc(100% + 8px);
   right: 0;
+  left: auto;
   width: 340px;
+  max-width: calc(100vw - 16px);
   max-height: 420px;
   background: var(--surface);
   border: 1px solid var(--border);
@@ -1641,6 +1643,22 @@ input[type="date"] {
   /* Disable drag cursor on mobile */
   .card {
     cursor: default;
+  }
+}
+
+/* Mobile notification dropdown — keep right-aligned and within viewport */
+@media (max-width: 768px) {
+  .notif-dropdown {
+    right: 0;
+    left: auto;
+    width: min(340px, calc(100vw - 16px));
+    max-height: min(420px, calc(100dvh - 80px));
+    overflow-y: auto;
+  }
+
+  .notif-list {
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
   }
 }
 
