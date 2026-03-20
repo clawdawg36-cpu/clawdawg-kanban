@@ -1750,14 +1750,388 @@ input[type="date"] {
     padding: 10px 12px;
   }
 }
+
+/* ===== PROJECT SIDEBAR ===== */
+#projectSidebar {
+  position: fixed;
+  top: 0; left: 0;
+  width: 220px;
+  height: 100vh;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  z-index: 80;
+  display: flex;
+  flex-direction: column;
+  transition: transform 0.25s cubic-bezier(0.4,0,0.2,1), width 0.25s cubic-bezier(0.4,0,0.2,1);
+  overflow: hidden;
+}
+
+#projectSidebar.sidebar-collapsed {
+  transform: translateX(-220px);
+}
+
+.sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 14px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.sidebar-header h3 {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+}
+
+#sidebarToggle {
+  width: 28px; height: 28px;
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  color: var(--text-dim);
+  border-radius: 6px;
+  cursor: pointer;
+  display: grid; place-items: center;
+  font-size: 16px;
+  transition: var(--transition);
+  flex-shrink: 0;
+}
+
+#sidebarToggle:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.sidebar-projects {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 0;
+}
+
+.sidebar-project {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  cursor: pointer;
+  transition: background var(--transition);
+  font-size: 14px;
+  color: var(--text-dim);
+  position: relative;
+  user-select: none;
+}
+
+.sidebar-project:hover {
+  background: var(--surface2);
+  color: var(--text);
+}
+
+.sidebar-project.active {
+  background: var(--accent-glow);
+  color: var(--text);
+  border-right: 3px solid var(--accent);
+}
+
+.sidebar-project .proj-emoji {
+  font-size: 18px;
+  flex-shrink: 0;
+  width: 24px;
+  text-align: center;
+}
+
+.sidebar-project .proj-name {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 500;
+}
+
+.sidebar-project .proj-pin {
+  font-size: 12px;
+  margin-left: -4px;
+}
+
+.sidebar-project .proj-count {
+  font-size: 11px;
+  background: var(--surface2);
+  padding: 1px 7px;
+  border-radius: 8px;
+  font-weight: 500;
+  flex-shrink: 0;
+  color: var(--text-dim);
+}
+
+.sidebar-project.active .proj-count {
+  background: rgba(108,92,231,0.25);
+  color: #a29bfe;
+}
+
+.sidebar-project-actions {
+  display: none;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.sidebar-project.show-actions .sidebar-project-actions {
+  display: flex;
+}
+
+.proj-action-btn {
+  width: 24px; height: 24px;
+  border: none;
+  background: var(--surface);
+  color: var(--text-dim);
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 12px;
+  display: grid; place-items: center;
+  transition: var(--transition);
+}
+
+.proj-action-btn:hover {
+  background: var(--accent);
+  color: #fff;
+}
+
+.proj-action-btn.delete:hover {
+  background: var(--red);
+}
+
+.sidebar-footer {
+  padding: 12px 14px;
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.sidebar-new-btn {
+  width: 100%;
+  padding: 9px 14px;
+  border-radius: 8px;
+  border: 1px dashed var(--border);
+  background: transparent;
+  color: var(--text-dim);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: var(--transition);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: center;
+}
+
+.sidebar-new-btn:hover {
+  border-color: var(--accent);
+  color: var(--text);
+  background: var(--accent-glow);
+}
+
+/* Main content shift when sidebar is open (desktop) */
+.app-content {
+  margin-left: 220px;
+  transition: margin-left 0.25s cubic-bezier(0.4,0,0.2,1);
+}
+
+.app-content.sidebar-collapsed {
+  margin-left: 0;
+}
+
+/* Sidebar expand button when collapsed (desktop) */
+.sidebar-expand-btn {
+  position: fixed;
+  top: 16px; left: 16px;
+  width: 36px; height: 36px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-dim);
+  border-radius: 8px;
+  cursor: pointer;
+  display: none;
+  place-items: center;
+  font-size: 18px;
+  z-index: 79;
+  transition: var(--transition);
+}
+
+.sidebar-expand-btn:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.sidebar-expand-btn.visible {
+  display: grid;
+}
+
+/* Mobile hamburger menu button */
+#mobileMenuBtn {
+  display: none;
+  width: 36px; height: 36px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-dim);
+  border-radius: 8px;
+  cursor: pointer;
+  place-items: center;
+  font-size: 18px;
+  transition: var(--transition);
+  flex-shrink: 0;
+}
+
+#mobileMenuBtn:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+/* Sidebar backdrop (mobile) */
+.sidebar-backdrop {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.5);
+  z-index: 79;
+}
+
+.sidebar-backdrop.open {
+  display: block;
+}
+
+/* Project Modal */
+#projectModal {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.6);
+  backdrop-filter: blur(4px);
+  display: none;
+  place-items: center;
+  z-index: 200;
+}
+
+#projectModal.open { display: grid; }
+
+.project-modal-content {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 28px;
+  width: 400px;
+  max-width: 90vw;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+  animation: modalIn 0.25s ease;
+}
+
+.project-modal-content h2 {
+  font-size: 18px;
+  font-weight: 700;
+  margin-bottom: 20px;
+  background: linear-gradient(135deg, #e4e6ef, #a29bfe);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+}
+
+.color-swatches {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.color-swatch {
+  width: 32px; height: 32px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.color-swatch:hover {
+  transform: scale(1.15);
+}
+
+.color-swatch.selected {
+  border-color: #fff;
+  box-shadow: 0 0 0 3px var(--accent);
+}
+
+.emoji-options {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.emoji-option {
+  width: 40px; height: 40px;
+  border-radius: 8px;
+  border: 2px solid var(--border);
+  background: var(--surface2);
+  font-size: 20px;
+  cursor: pointer;
+  display: grid; place-items: center;
+  transition: var(--transition);
+}
+
+.emoji-option:hover {
+  border-color: var(--accent);
+  transform: scale(1.1);
+}
+
+.emoji-option.selected {
+  border-color: var(--accent);
+  background: var(--accent-glow);
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+@media (max-width: 768px) {
+  #projectSidebar {
+    transform: translateX(-220px);
+  }
+
+  #projectSidebar.mobile-open {
+    transform: translateX(0);
+  }
+
+  #projectSidebar.sidebar-collapsed {
+    transform: translateX(-220px);
+  }
+
+  .app-content {
+    margin-left: 0 !important;
+  }
+
+  #mobileMenuBtn {
+    display: grid;
+  }
+
+  .sidebar-expand-btn {
+    display: none !important;
+  }
+}
 </style>
 </head>
 <body>
 
+<!-- Project Sidebar -->
+<nav id="projectSidebar" class="sidebar-collapsed">
+  <div class="sidebar-header">
+    <h3>Projects</h3>
+    <button id="sidebarToggle" onclick="toggleSidebar()" title="Collapse sidebar">☰</button>
+  </div>
+  <div class="sidebar-projects" id="sidebarProjects"></div>
+  <div class="sidebar-footer">
+    <button class="sidebar-new-btn" onclick="openProjectModal()">+ New Project</button>
+  </div>
+</nav>
+<div class="sidebar-backdrop" id="sidebarBackdrop" onclick="closeMobileSidebar()"></div>
+<button class="sidebar-expand-btn" id="sidebarExpandBtn" onclick="toggleSidebar()" title="Open sidebar">☰</button>
+
+<div class="app-content sidebar-collapsed" id="appContent">
 <header>
   <div class="logo">
+    <button id="mobileMenuBtn" onclick="openMobileSidebar()" title="Menu">☰</button>
     <div class="logo-icon">K</div>
-    <h1>Kanban Board</h1>
+    <h1 id="headerTitle">Kanban Board</h1>
   </div>
   <div class="header-actions">
     <button class="filter-btn active" data-filter="all">All</button>
@@ -1993,6 +2367,47 @@ input[type="date"] {
     <div class="stat-highlights" id="statHighlights"></div>
     <div id="statDetails"></div>
     <button class="stats-close" onclick="closeStats()">Close</button>
+  </div>
+</div>
+
+<!-- Close app-content wrapper -->
+</div>
+
+<!-- Project Modal -->
+<div id="projectModal" onclick="if(event.target===this)closeProjectModal()">
+  <div class="project-modal-content">
+    <h2 id="projectModalTitle">New Project</h2>
+    <input type="hidden" id="projectEditId">
+    <div class="field">
+      <label>Project Name</label>
+      <input type="text" id="pName" placeholder="My Project">
+    </div>
+    <div class="field">
+      <label>Color</label>
+      <div class="color-swatches" id="colorSwatches">
+        <div class="color-swatch selected" data-color="#6c5ce7" style="background:#6c5ce7"></div>
+        <div class="color-swatch" data-color="#00b894" style="background:#00b894"></div>
+        <div class="color-swatch" data-color="#e17055" style="background:#e17055"></div>
+        <div class="color-swatch" data-color="#0984e3" style="background:#0984e3"></div>
+        <div class="color-swatch" data-color="#fdcb6e" style="background:#fdcb6e"></div>
+        <div class="color-swatch" data-color="#a29bfe" style="background:#a29bfe"></div>
+      </div>
+    </div>
+    <div class="field">
+      <label>Emoji</label>
+      <div class="emoji-options" id="emojiOptions">
+        <div class="emoji-option selected" data-emoji="📋">📋</div>
+        <div class="emoji-option" data-emoji="🚀">🚀</div>
+        <div class="emoji-option" data-emoji="💡">💡</div>
+        <div class="emoji-option" data-emoji="🎯">🎯</div>
+        <div class="emoji-option" data-emoji="🔥">🔥</div>
+        <div class="emoji-option" data-emoji="⭐">⭐</div>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="closeProjectModal()">Cancel</button>
+      <button class="btn-save" onclick="saveProject()">Save Project</button>
+    </div>
   </div>
 </div>
 
@@ -2994,6 +3409,212 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Escape') { closeModal(); closeStats(); }
 });
 
+// ─── Project Sidebar ──────────────────────────────────────────────────────────
+let projects = [];
+let activeProjectId = localStorage.getItem('activeProjectId') || 'default';
+
+async function loadProjects() {
+  try {
+    const res = await fetch('/api/projects');
+    projects = await res.json();
+    renderSidebar();
+    updateHeaderTitle();
+  } catch (e) {
+    console.error('Failed to load projects', e);
+  }
+}
+
+function getProjectTaskCount(projectId) {
+  return tasks.filter(t => t.projectId === projectId).length;
+}
+
+function renderSidebar() {
+  const container = document.getElementById('sidebarProjects');
+  container.innerHTML = projects.map(p => {
+    const isActive = p.id === activeProjectId;
+    const count = getProjectTaskCount(p.id);
+    const isDefault = p.id === 'default';
+    return `<div class="sidebar-project${isActive ? ' active' : ''}" data-project-id="${p.id}"
+              onclick="switchProject('${p.id}')"
+              oncontextmenu="event.preventDefault();toggleProjectActions('${p.id}')">
+      <span class="proj-emoji">${p.emoji || '📋'}</span>
+      <span class="proj-name">${esc(p.name)}</span>
+      ${isDefault ? '<span class="proj-pin">📌</span>' : ''}
+      <span class="proj-count">${count}</span>
+      <div class="sidebar-project-actions">
+        <button class="proj-action-btn" onclick="event.stopPropagation();editProject('${p.id}')" title="Edit">✎</button>
+        ${!isDefault ? `<button class="proj-action-btn delete" onclick="event.stopPropagation();deleteProject('${p.id}')" title="Delete">×</button>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function updateHeaderTitle() {
+  const proj = projects.find(p => p.id === activeProjectId);
+  const titleEl = document.getElementById('headerTitle');
+  if (proj && titleEl) {
+    titleEl.textContent = proj.name;
+  }
+}
+
+function switchProject(projectId) {
+  activeProjectId = projectId;
+  localStorage.setItem('activeProjectId', projectId);
+  renderSidebar();
+  updateHeaderTitle();
+  loadTasks();
+  // Close mobile sidebar if open
+  if (isMobile()) closeMobileSidebar();
+}
+
+function toggleProjectActions(projectId) {
+  const el = document.querySelector(`.sidebar-project[data-project-id="${projectId}"]`);
+  if (el) {
+    const isShowing = el.classList.contains('show-actions');
+    document.querySelectorAll('.sidebar-project.show-actions').forEach(e => e.classList.remove('show-actions'));
+    if (!isShowing) el.classList.add('show-actions');
+  }
+}
+
+// Sidebar toggle (desktop)
+let sidebarCollapsed = localStorage.getItem('sidebarCollapsed') === 'true';
+
+function initSidebar() {
+  const sidebar = document.getElementById('projectSidebar');
+  const content = document.getElementById('appContent');
+  const expandBtn = document.getElementById('sidebarExpandBtn');
+
+  if (sidebarCollapsed) {
+    sidebar.classList.add('sidebar-collapsed');
+    content.classList.add('sidebar-collapsed');
+    expandBtn.classList.add('visible');
+  } else {
+    sidebar.classList.remove('sidebar-collapsed');
+    content.classList.remove('sidebar-collapsed');
+    expandBtn.classList.remove('visible');
+  }
+}
+
+function toggleSidebar() {
+  sidebarCollapsed = !sidebarCollapsed;
+  localStorage.setItem('sidebarCollapsed', sidebarCollapsed);
+  initSidebar();
+}
+
+function openMobileSidebar() {
+  const sidebar = document.getElementById('projectSidebar');
+  const backdrop = document.getElementById('sidebarBackdrop');
+  sidebar.classList.remove('sidebar-collapsed');
+  sidebar.classList.add('mobile-open');
+  backdrop.classList.add('open');
+}
+
+function closeMobileSidebar() {
+  const sidebar = document.getElementById('projectSidebar');
+  const backdrop = document.getElementById('sidebarBackdrop');
+  sidebar.classList.remove('mobile-open');
+  sidebar.classList.add('sidebar-collapsed');
+  backdrop.classList.remove('open');
+}
+
+// Project Modal
+let selectedProjectColor = '#6c5ce7';
+let selectedProjectEmoji = '📋';
+
+document.querySelectorAll('.color-swatch').forEach(swatch => {
+  swatch.addEventListener('click', () => {
+    document.querySelectorAll('.color-swatch').forEach(s => s.classList.remove('selected'));
+    swatch.classList.add('selected');
+    selectedProjectColor = swatch.dataset.color;
+  });
+});
+
+document.querySelectorAll('.emoji-option').forEach(opt => {
+  opt.addEventListener('click', () => {
+    document.querySelectorAll('.emoji-option').forEach(o => o.classList.remove('selected'));
+    opt.classList.add('selected');
+    selectedProjectEmoji = opt.dataset.emoji;
+  });
+});
+
+function openProjectModal(project) {
+  const modal = document.getElementById('projectModal');
+  document.getElementById('projectModalTitle').textContent = project ? 'Edit Project' : 'New Project';
+  document.getElementById('projectEditId').value = project ? project.id : '';
+  document.getElementById('pName').value = project ? project.name : '';
+
+  // Reset and set color
+  selectedProjectColor = project ? project.color : '#6c5ce7';
+  document.querySelectorAll('.color-swatch').forEach(s => {
+    s.classList.toggle('selected', s.dataset.color === selectedProjectColor);
+  });
+
+  // Reset and set emoji
+  selectedProjectEmoji = project ? project.emoji : '📋';
+  document.querySelectorAll('.emoji-option').forEach(o => {
+    o.classList.toggle('selected', o.dataset.emoji === selectedProjectEmoji);
+  });
+
+  modal.classList.add('open');
+  setTimeout(() => document.getElementById('pName').focus(), 100);
+}
+
+function closeProjectModal() {
+  document.getElementById('projectModal').classList.remove('open');
+}
+
+async function saveProject() {
+  const id = document.getElementById('projectEditId').value;
+  const name = document.getElementById('pName').value.trim();
+  if (!name) { document.getElementById('pName').focus(); return; }
+
+  const data = { name, color: selectedProjectColor, emoji: selectedProjectEmoji };
+
+  if (id) {
+    await fetch(`/api/projects/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+  } else {
+    await fetch('/api/projects', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+  }
+  closeProjectModal();
+  await loadProjects();
+}
+
+function editProject(id) {
+  const project = projects.find(p => p.id === id);
+  if (project) openProjectModal(project);
+}
+
+async function deleteProject(id) {
+  if (id === 'default') return;
+  const project = projects.find(p => p.id === id);
+  if (!confirm(`Delete project "${project ? project.name : id}" and all its tasks?`)) return;
+  await fetch(`/api/projects/${id}`, { method: 'DELETE' });
+  if (activeProjectId === id) {
+    activeProjectId = 'default';
+    localStorage.setItem('activeProjectId', 'default');
+  }
+  await loadProjects();
+  await loadTasks();
+}
+
+// Close project actions when clicking elsewhere
+document.addEventListener('click', e => {
+  if (!e.target.closest('.sidebar-project')) {
+    document.querySelectorAll('.sidebar-project.show-actions').forEach(el => el.classList.remove('show-actions'));
+  }
+});
+
+// Initialize sidebar
+initSidebar();
+loadProjects();
 loadTasks();
 loadNotifications();
 </script>
