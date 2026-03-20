@@ -8,6 +8,17 @@ const TASKS_JSON = path.join(__dirname, 'tasks.json');
 const db = new Database(DB_PATH);
 db.pragma('journal_mode = WAL');
 
+// Projects table
+db.exec(`
+  CREATE TABLE IF NOT EXISTS projects (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    color TEXT DEFAULT '#6c5ce7',
+    emoji TEXT DEFAULT '📋',
+    createdAt TEXT NOT NULL
+  )
+`);
+
 db.exec(`
   CREATE TABLE IF NOT EXISTS tasks (
     id TEXT PRIMARY KEY,
@@ -46,7 +57,7 @@ db.exec(`
   )
 `);
 
-// Migrate: add dueDate column if it doesn't exist (for existing databases)
+// Migrate: add columns if they don't exist (for existing databases)
 const cols = db.prepare("PRAGMA table_info(tasks)").all().map(c => c.name);
 if (!cols.includes('dueDate')) {
   db.exec('ALTER TABLE tasks ADD COLUMN dueDate TEXT DEFAULT NULL');
@@ -59,6 +70,24 @@ if (!cols.includes('recurring')) {
 if (!cols.includes('subtasks')) {
   db.exec('ALTER TABLE tasks ADD COLUMN subtasks TEXT DEFAULT NULL');
   console.log('Migrated: added subtasks column to tasks table');
+}
+if (!cols.includes('projectId')) {
+  db.exec('ALTER TABLE tasks ADD COLUMN projectId TEXT DEFAULT NULL');
+  console.log('Migrated: added projectId column to tasks table');
+}
+
+// Ensure default project exists and assign orphaned tasks to it
+const defaultProject = db.prepare("SELECT id FROM projects WHERE id = 'default'").get();
+if (!defaultProject) {
+  db.prepare(
+    "INSERT INTO projects (id, name, color, emoji, createdAt) VALUES ('default', 'Kanban Board', '#6c5ce7', '📋', ?)"
+  ).run(new Date().toISOString());
+  console.log('Created default project');
+}
+// Assign all tasks with NULL projectId to default project
+const unassigned = db.prepare("UPDATE tasks SET projectId = 'default' WHERE projectId IS NULL").run();
+if (unassigned.changes > 0) {
+  console.log(`Assigned ${unassigned.changes} task(s) to default project`);
 }
 
 // Migrate existing tasks from tasks.json on first run

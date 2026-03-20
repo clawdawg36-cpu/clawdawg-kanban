@@ -26,9 +26,57 @@ const COL_LABELS = { 'backlog': 'Backlog', 'in-progress': 'In Progress', 'in-rev
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Get all tasks
+// ─── Projects ─────────────────────────────────────────────────────────────────
+
+// GET /api/projects — list all projects
+app.get('/api/projects', (req, res) => {
+  const rows = db.prepare('SELECT * FROM projects ORDER BY createdAt ASC').all();
+  res.json(rows);
+});
+
+// POST /api/projects — create a project
+app.post('/api/projects', (req, res) => {
+  const project = {
+    id: Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
+    name: req.body.name || 'New Project',
+    color: req.body.color || '#6c5ce7',
+    emoji: req.body.emoji || '📋',
+    createdAt: new Date().toISOString(),
+  };
+  db.prepare(
+    'INSERT INTO projects (id, name, color, emoji, createdAt) VALUES (?, ?, ?, ?, ?)'
+  ).run(project.id, project.name, project.color, project.emoji, project.createdAt);
+  res.status(201).json(project);
+});
+
+// PUT /api/projects/:id — update a project
+app.put('/api/projects/:id', (req, res) => {
+  const existing = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id);
+  if (!existing) return res.status(404).json({ error: 'Not found' });
+  const updated = {
+    name: req.body.name !== undefined ? req.body.name : existing.name,
+    color: req.body.color !== undefined ? req.body.color : existing.color,
+    emoji: req.body.emoji !== undefined ? req.body.emoji : existing.emoji,
+  };
+  db.prepare('UPDATE projects SET name = ?, color = ?, emoji = ? WHERE id = ?')
+    .run(updated.name, updated.color, updated.emoji, req.params.id);
+  res.json({ ...existing, ...updated });
+});
+
+// DELETE /api/projects/:id — delete project and cascade tasks
+app.delete('/api/projects/:id', (req, res) => {
+  if (req.params.id === 'default') return res.status(400).json({ error: 'Cannot delete default project' });
+  db.prepare("DELETE FROM tasks WHERE projectId = ?").run(req.params.id);
+  db.prepare('DELETE FROM projects WHERE id = ?').run(req.params.id);
+  res.status(204).end();
+});
+
+// ─── Tasks ────────────────────────────────────────────────────────────────────
+
+// Get all tasks (optionally filtered by projectId)
 app.get('/api/tasks', (req, res) => {
-  const rows = db.prepare('SELECT * FROM tasks').all();
+  const projectId = req.query.projectId || 'default';
+  const rows = db.prepare("SELECT * FROM tasks WHERE projectId = ?").all(projectId);
   res.json(rows.map(row => ({ ...row, tags: JSON.parse(row.tags), subtasks: row.subtasks ? JSON.parse(row.subtasks) : null })));
 });
 
@@ -45,10 +93,11 @@ app.post('/api/tasks', (req, res) => {
     createdAt: new Date().toISOString(),
     recurring: req.body.recurring || null,
     subtasks: req.body.subtasks || null,
+    projectId: req.body.projectId || 'default',
   };
   db.prepare(
-    'INSERT INTO tasks (id, title, description, assignee, priority, tags, "column", createdAt, recurring, subtasks) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-  ).run(task.id, task.title, task.description, task.assignee, task.priority, JSON.stringify(task.tags), task.column, task.createdAt, task.recurring, task.subtasks ? JSON.stringify(task.subtasks) : null);
+    'INSERT INTO tasks (id, title, description, assignee, priority, tags, "column", createdAt, recurring, subtasks, projectId) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+  ).run(task.id, task.title, task.description, task.assignee, task.priority, JSON.stringify(task.tags), task.column, task.createdAt, task.recurring, task.subtasks ? JSON.stringify(task.subtasks) : null, task.projectId);
 
   // Log card creation
   const actId = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
