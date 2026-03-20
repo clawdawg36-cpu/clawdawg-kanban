@@ -52,6 +52,14 @@ if (!cols.includes('dueDate')) {
   db.exec('ALTER TABLE tasks ADD COLUMN dueDate TEXT DEFAULT NULL');
   console.log('Migrated: added dueDate column to tasks table');
 }
+if (!cols.includes('recurring')) {
+  db.exec('ALTER TABLE tasks ADD COLUMN recurring TEXT DEFAULT NULL');
+  console.log('Migrated: added recurring column to tasks table');
+}
+if (!cols.includes('subtasks')) {
+  db.exec('ALTER TABLE tasks ADD COLUMN subtasks TEXT DEFAULT NULL');
+  console.log('Migrated: added subtasks column to tasks table');
+}
 
 // Migrate existing tasks from tasks.json on first run
 if (fs.existsSync(TASKS_JSON)) {

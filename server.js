@@ -13,7 +13,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 // Get all tasks
 app.get('/api/tasks', (req, res) => {
   const rows = db.prepare('SELECT * FROM tasks').all();
-  res.json(rows.map(row => ({ ...row, tags: JSON.parse(row.tags) })));
+  res.json(rows.map(row => ({ ...row, tags: JSON.parse(row.tags), subtasks: row.subtasks ? JSON.parse(row.subtasks) : null })));
 });
 
 // Create task
@@ -27,10 +27,12 @@ app.post('/api/tasks', (req, res) => {
     tags: req.body.tags || [],
     column: req.body.column || 'backlog',
     createdAt: new Date().toISOString(),
+    recurring: req.body.recurring || null,
+    subtasks: req.body.subtasks || null,
   };
   db.prepare(
-    'INSERT INTO tasks (id, title, description, assignee, priority, tags, "column", createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
-  ).run(task.id, task.title, task.description, task.assignee, task.priority, JSON.stringify(task.tags), task.column, task.createdAt);
+    'INSERT INTO tasks (id, title, description, assignee, priority, tags, "column", createdAt, recurring, subtasks) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+  ).run(task.id, task.title, task.description, task.assignee, task.priority, JSON.stringify(task.tags), task.column, task.createdAt, task.recurring, task.subtasks ? JSON.stringify(task.subtasks) : null);
 
   // Log card creation
   const actId = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
@@ -49,14 +51,15 @@ app.put('/api/tasks/:id', (req, res) => {
   const updated = {
     ...existing,
     tags: JSON.parse(existing.tags),
+    subtasks: existing.subtasks ? JSON.parse(existing.subtasks) : null,
     ...req.body,
     id: existing.id,
     createdAt: existing.createdAt,
   };
 
   db.prepare(
-    'UPDATE tasks SET title = ?, description = ?, assignee = ?, priority = ?, tags = ?, "column" = ? WHERE id = ?'
-  ).run(updated.title, updated.description, updated.assignee, updated.priority, JSON.stringify(updated.tags), updated.column, updated.id);
+    'UPDATE tasks SET title = ?, description = ?, assignee = ?, priority = ?, tags = ?, "column" = ?, dueDate = ?, recurring = ?, subtasks = ? WHERE id = ?'
+  ).run(updated.title, updated.description, updated.assignee, updated.priority, JSON.stringify(updated.tags), updated.column, updated.dueDate || null, updated.recurring || null, updated.subtasks ? JSON.stringify(updated.subtasks) : null, updated.id);
 
   // Auto-log column changes
   if (req.body.column && req.body.column !== existing.column) {
@@ -69,6 +72,19 @@ app.put('/api/tasks/:id', (req, res) => {
     db.prepare(
       'INSERT INTO notifications (task_id, task_title, from_col, to_col, changed_by, created_at) VALUES (?, ?, ?, ?, ?, ?)'
     ).run(existing.id, existing.title, existing.column, req.body.column, updated.assignee || 'System', now);
+
+    // Recurring task: auto-create new card when moved to done
+    if (req.body.column === 'done' && existing.recurring) {
+      const newId = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+      const newCreatedAt = new Date().toISOString();
+      db.prepare(
+        'INSERT INTO tasks (id, title, description, assignee, priority, tags, "column", createdAt, recurring, subtasks) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+      ).run(newId, existing.title, existing.description, existing.assignee, existing.priority, existing.tags, 'backlog', newCreatedAt, existing.recurring, null);
+      const recActId = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+      db.prepare(
+        'INSERT INTO card_activity (id, taskId, type, content, author, createdAt) VALUES (?, ?, ?, ?, ?, ?)'
+      ).run(recActId, newId, 'created', `Recurring card created (${existing.recurring}) from completed task`, 'System', newCreatedAt);
+    }
   }
 
   res.json(updated);
@@ -174,6 +190,49 @@ app.delete('/api/tasks/:id/blockers/:blocker_id', (req, res) => {
   db.prepare('DELETE FROM task_dependencies WHERE blocker_id = ? AND blocked_id = ?')
     .run(req.params.blocker_id, req.params.id);
   res.status(204).end();
+});
+
+// ─── Stats Dashboard ─────────────────────────────────────────────────────────
+app.get('/api/stats', (req, res) => {
+  // Tasks by assignee
+  const assigneeRows = db.prepare('SELECT assignee, COUNT(*) as cnt FROM tasks GROUP BY assignee').all();
+  const totalByAssignee = {};
+  assigneeRows.forEach(r => { totalByAssignee[r.assignee] = r.cnt; });
+
+  // Column counts
+  const colRows = db.prepare('SELECT "column", COUNT(*) as cnt FROM tasks GROUP BY "column"').all();
+  const columnCounts = {};
+  colRows.forEach(r => { columnCounts[r.column] = r.cnt; });
+
+  // Completed this week (tasks moved to done in last 7 days via card_activity)
+  const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  const completedThisWeek = db.prepare(
+    `SELECT COUNT(DISTINCT taskId) as cnt FROM card_activity WHERE type = 'move' AND content LIKE '%→ Done%' AND createdAt >= ?`
+  ).get(weekAgo).cnt;
+
+  // Overdue count
+  const now = new Date().toISOString().slice(0, 10);
+  const overdueCount = db.prepare(
+    `SELECT COUNT(*) as cnt FROM tasks WHERE dueDate IS NOT NULL AND dueDate < ? AND "column" != 'done'`
+  ).get(now).cnt;
+
+  // Average time to complete (seconds from createdAt to move-to-done activity)
+  const completionRows = db.prepare(`
+    SELECT t.createdAt as taskCreated, MIN(a.createdAt) as doneAt
+    FROM tasks t
+    INNER JOIN card_activity a ON a.taskId = t.id AND a.type = 'move' AND a.content LIKE '%→ Done%'
+    WHERE t."column" = 'done'
+    GROUP BY t.id
+  `).all();
+  let avgTimeToComplete = 0;
+  if (completionRows.length > 0) {
+    const totalSec = completionRows.reduce((sum, r) => {
+      return sum + (new Date(r.doneAt).getTime() - new Date(r.taskCreated).getTime()) / 1000;
+    }, 0);
+    avgTimeToComplete = Math.round(totalSec / completionRows.length);
+  }
+
+  res.json({ totalByAssignee, completedThisWeek, overdueCount, columnCounts, avgTimeToComplete });
 });
 
 app.listen(PORT, () => {

@@ -334,6 +334,23 @@ input[type="date"] {
   color-scheme: dark;
 }
 
+/* Recurring badge */
+.recurring-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 6px;
+  margin-top: 6px;
+  margin-bottom: 2px;
+  background: rgba(0, 184, 148, 0.12);
+  color: var(--green);
+  border: 1px solid rgba(0, 184, 148, 0.3);
+  text-transform: capitalize;
+}
+
 .card-actions {
   position: absolute;
   top: 10px; right: 10px;
@@ -1167,6 +1184,131 @@ input[type="date"] {
   color: #a29bfe;
 }
 
+/* Recurring badge */
+.recurring-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: rgba(162, 155, 254, 0.15);
+  color: #a29bfe;
+  border: 1px solid rgba(162, 155, 254, 0.3);
+}
+
+/* Subtask progress on card */
+.subtask-progress {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-dim);
+  margin-top: 6px;
+}
+.subtask-progress.all-done { color: var(--green); }
+
+/* Swimlane priority group dividers */
+.swimlane-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  margin-top: 4px;
+}
+.swimlane-header:first-child { margin-top: 0; }
+.swimlane-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+.swimlane-line {
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+/* Checklist section in modal */
+.checklist-section { margin-bottom: 14px; }
+.checklist-section label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-dim);
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.checklist-items { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+.checklist-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 13px;
+}
+.checklist-item input[type="checkbox"] { accent-color: var(--accent); cursor: pointer; width: 16px; height: 16px; }
+.checklist-item .cl-text { flex: 1; }
+.checklist-item .cl-text.done { text-decoration: line-through; color: var(--text-dim); }
+.checklist-item .cl-remove {
+  border: none; background: transparent; color: var(--text-dim); cursor: pointer;
+  font-size: 16px; line-height: 1; padding: 0 2px; transition: var(--transition);
+}
+.checklist-item .cl-remove:hover { color: var(--red); }
+.checklist-add-row { display: flex; gap: 8px; }
+.checklist-add-row input {
+  flex: 1; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border);
+  background: var(--surface2); color: var(--text); font-family: inherit; font-size: 13px; outline: none;
+}
+.checklist-add-row input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
+.checklist-add-btn {
+  padding: 8px 14px; border-radius: 8px; border: 1px solid var(--accent);
+  background: var(--accent-glow); color: #a29bfe; font-family: inherit; font-size: 12px;
+  font-weight: 600; cursor: pointer; white-space: nowrap; transition: var(--transition);
+}
+.checklist-add-btn:hover { background: var(--accent); color: #fff; }
+
+/* Stats panel */
+.stats-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.6); backdrop-filter: blur(4px);
+  display: none; place-items: center; z-index: 100;
+}
+.stats-overlay.open { display: grid; }
+.stats-panel {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 16px;
+  padding: 28px; width: 480px; max-width: 90vw; max-height: 80vh; overflow-y: auto;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.5); animation: modalIn 0.25s ease;
+}
+.stats-panel h2 {
+  font-size: 18px; font-weight: 700; margin-bottom: 20px;
+  background: linear-gradient(135deg, #e4e6ef, #a29bfe);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+}
+.stat-group { margin-bottom: 18px; }
+.stat-group h3 { font-size: 12px; font-weight: 600; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 8px; }
+.stat-row { display: flex; justify-content: space-between; padding: 6px 0; font-size: 14px; border-bottom: 1px solid var(--border); }
+.stat-row:last-child { border-bottom: none; }
+.stat-label { color: var(--text); }
+.stat-value { font-weight: 600; color: #a29bfe; }
+.stat-highlight { font-size: 28px; font-weight: 700; color: var(--text); margin-bottom: 4px; }
+.stat-highlight-label { font-size: 12px; color: var(--text-dim); }
+.stat-highlights { display: flex; gap: 20px; margin-bottom: 20px; }
+.stat-highlights > div { flex: 1; text-align: center; padding: 14px; background: var(--surface2); border-radius: 10px; border: 1px solid var(--border); }
+.stats-close {
+  padding: 9px 18px; border-radius: 8px; border: 1px solid var(--border);
+  background: transparent; color: var(--text-dim); font-family: inherit;
+  font-size: 13px; font-weight: 500; cursor: pointer; transition: var(--transition); margin-top: 10px;
+}
+.stats-close:hover { background: var(--surface2); color: var(--text); }
+
 .search-reset-btn {
   padding: 7px 12px;
   border-radius: 8px;
@@ -1542,6 +1684,7 @@ input[type="date"] {
         </div>
       </div>
     </div>
+    <button class="filter-btn" onclick="openStats()">📊 Stats</button>
     <button class="btn-add" onclick="openModal()">+ New Task</button>
   </div>
 </header>
@@ -1670,9 +1813,34 @@ input[type="date"] {
         <input type="date" id="fDueDate">
       </div>
     </div>
+    <div class="field-row">
+      <div class="field">
+        <label>🔄 Recurring</label>
+        <select id="fRecurring">
+          <option value="">None (one-time)</option>
+          <option value="daily">Daily</option>
+          <option value="weekly">Weekly</option>
+          <option value="monthly">Monthly</option>
+        </select>
+      </div>
+      <div class="field" style="display:flex;align-items:flex-end;padding-bottom:2px">
+        <small style="color:var(--text-dim);font-size:11px;line-height:1.4">
+          When set, completing this task will<br>auto-respawn it in Backlog.
+        </small>
+      </div>
+    </div>
     <div class="field">
       <label>Tags (comma-separated)</label>
       <input type="text" id="fTags" placeholder="bug, frontend">
+    </div>
+    <!-- Checklist / Subtasks -->
+    <div class="checklist-section" id="checklistSection">
+      <label>Checklist</label>
+      <div class="checklist-items" id="checklistItems"></div>
+      <div class="checklist-add-row">
+        <input type="text" id="checklistInput" placeholder="Add checklist item..." onkeydown="if(event.key==='Enter'){event.preventDefault();addChecklistItem();}">
+        <button class="checklist-add-btn" onclick="addChecklistItem()">Add</button>
+      </div>
     </div>
     <div class="dep-section" id="depSection" style="display:none">
       <label>🔒 Blocked By</label>
@@ -1710,6 +1878,16 @@ input[type="date"] {
         </div>
       </div>
     </div>
+  </div>
+</div>
+
+<!-- Stats Panel -->
+<div class="stats-overlay" id="statsOverlay" onclick="if(event.target===this)closeStats()">
+  <div class="stats-panel">
+    <h2>Board Stats</h2>
+    <div class="stat-highlights" id="statHighlights"></div>
+    <div id="statDetails"></div>
+    <button class="stats-close" onclick="closeStats()">Close</button>
   </div>
 </div>
 
@@ -1897,6 +2075,7 @@ function cardHTML(t, q) {
     ${blockedBanner}
     ${tags ? `<div class="card-tags">${tags}</div>` : ''}
     ${t.column !== 'done' && t.dueDate ? dueBadgeHTML(t.dueDate) : ''}
+    ${t.recurring ? `<div class="recurring-badge">🔄 ${t.recurring}</div>` : ''}
     <div class="card-meta">
       <span class="card-assignee"><span class="avatar ${avatarClass}">${initials}</span>${t.assignee}</span>
       <span class="card-date">${date}</span>
@@ -2056,6 +2235,7 @@ function openModal(task) {
   document.getElementById('fColumn').value = task ? task.column : 'backlog';
   document.getElementById('fDueDate').value = task && task.dueDate ? task.dueDate : '';
   document.getElementById('fTags').value = task ? (task.tags || []).join(', ') : '';
+  document.getElementById('fRecurring').value = (task && task.recurring) ? task.recurring : '';
 
   // Dependencies section — only for existing tasks
   const depSection = document.getElementById('depSection');
@@ -2251,6 +2431,7 @@ async function saveTask() {
     column: document.getElementById('fColumn').value,
     dueDate: document.getElementById('fDueDate').value || null,
     tags: tagsRaw ? tagsRaw.split(',').map(s => s.trim()).filter(Boolean) : [],
+    recurring: document.getElementById('fRecurring').value || null,
   };
   if (!data.title) { document.getElementById('fTitle').focus(); return; }
 
