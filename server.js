@@ -46,6 +46,16 @@ app.post('/api/projects', (req, res) => {
   db.prepare(
     'INSERT INTO projects (id, name, color, emoji, createdAt) VALUES (?, ?, ?, ?, ?)'
   ).run(project.id, project.name, project.color, project.emoji, project.createdAt);
+  // Create default agent-task template for new project
+  const tmplId = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+  db.prepare(
+    'INSERT INTO templates (id, projectId, name, defaultDescription, defaultTags, defaultAssignee, defaultPriority, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+  ).run(
+    tmplId, project.id, 'agent-task',
+    'Read /Users/mike/.openclaw/workspace/SUBAGENTS.md first.\n\n## Task\n\n[describe task here]\n\n## Git workflow\ngit pull origin main before starting.\nCommit as clawdawg36-cpu.\n\n## Notification\nText Mike at +18183121807 when done.',
+    JSON.stringify(['agent', 'automation']),
+    'ClawDawg', 'medium', new Date().toISOString()
+  );
   res.status(201).json(project);
 });
 
@@ -68,6 +78,39 @@ app.delete('/api/projects/:id', (req, res) => {
   if (req.params.id === 'default') return res.status(400).json({ error: 'Cannot delete default project' });
   db.prepare("DELETE FROM tasks WHERE projectId = ?").run(req.params.id);
   db.prepare('DELETE FROM projects WHERE id = ?').run(req.params.id);
+  res.status(204).end();
+});
+
+// ─── Templates ───────────────────────────────────────────────────────────────
+
+// GET /api/templates?projectId=x
+app.get('/api/templates', (req, res) => {
+  const projectId = req.query.projectId || 'default';
+  const rows = db.prepare('SELECT * FROM templates WHERE projectId = ? ORDER BY createdAt ASC').all(projectId);
+  res.json(rows.map(r => ({ ...r, defaultTags: JSON.parse(r.defaultTags) })));
+});
+
+// POST /api/templates
+app.post('/api/templates', (req, res) => {
+  const tmpl = {
+    id: Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
+    projectId: req.body.projectId || 'default',
+    name: req.body.name || 'New Template',
+    defaultDescription: req.body.defaultDescription || '',
+    defaultTags: req.body.defaultTags || [],
+    defaultAssignee: req.body.defaultAssignee || 'Mike',
+    defaultPriority: req.body.defaultPriority || 'medium',
+    createdAt: new Date().toISOString(),
+  };
+  db.prepare(
+    'INSERT INTO templates (id, projectId, name, defaultDescription, defaultTags, defaultAssignee, defaultPriority, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+  ).run(tmpl.id, tmpl.projectId, tmpl.name, tmpl.defaultDescription, JSON.stringify(tmpl.defaultTags), tmpl.defaultAssignee, tmpl.defaultPriority, tmpl.createdAt);
+  res.status(201).json({ ...tmpl });
+});
+
+// DELETE /api/templates/:id
+app.delete('/api/templates/:id', (req, res) => {
+  db.prepare('DELETE FROM templates WHERE id = ?').run(req.params.id);
   res.status(204).end();
 });
 

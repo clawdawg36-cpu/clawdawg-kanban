@@ -143,6 +143,20 @@ db.exec(`
   )
 `);
 
+// Templates table
+db.exec(`
+  CREATE TABLE IF NOT EXISTS templates (
+    id TEXT PRIMARY KEY,
+    projectId TEXT NOT NULL,
+    name TEXT NOT NULL,
+    defaultDescription TEXT DEFAULT '',
+    defaultTags TEXT DEFAULT '[]',
+    defaultAssignee TEXT DEFAULT 'Mike',
+    defaultPriority TEXT DEFAULT 'medium',
+    createdAt TEXT NOT NULL
+  )
+`);
+
 // Notifications table
 db.exec(`
   CREATE TABLE IF NOT EXISTS notifications (

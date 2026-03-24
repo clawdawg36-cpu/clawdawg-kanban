@@ -2363,6 +2363,12 @@ input[type="date"] {
   <div class="modal">
     <h2 id="modalTitle">New Task</h2>
     <input type="hidden" id="taskId">
+    <div class="field" id="templateSelectField" style="display:none">
+      <label>Use Template</label>
+      <select id="fTemplate" onchange="applyTemplate()">
+        <option value="">— no template —</option>
+      </select>
+    </div>
     <div class="field">
       <label>Title</label>
       <input type="text" id="fTitle" placeholder="What needs to be done?">
@@ -2983,6 +2989,39 @@ function removeChecklistItem(idx) {
   renderChecklist();
 }
 
+// Templates
+let currentTemplates = [];
+
+async function loadTemplatesForModal(projectId) {
+  try {
+    const res = await fetch(`/api/templates?projectId=${encodeURIComponent(projectId)}`);
+    currentTemplates = await res.json();
+    const sel = document.getElementById('fTemplate');
+    const field = document.getElementById('templateSelectField');
+    if (currentTemplates.length > 0) {
+      sel.innerHTML = '<option value="">— no template —</option>' +
+        currentTemplates.map(t => `<option value="${t.id}">${esc(t.name)}</option>`).join('');
+      field.style.display = '';
+    } else {
+      field.style.display = 'none';
+    }
+    sel.value = '';
+  } catch(e) {
+    console.error('Failed to load templates', e);
+  }
+}
+
+function applyTemplate() {
+  const tmplId = document.getElementById('fTemplate').value;
+  if (!tmplId) return;
+  const tmpl = currentTemplates.find(t => t.id === tmplId);
+  if (!tmpl) return;
+  document.getElementById('fDesc').value = tmpl.defaultDescription || '';
+  document.getElementById('fTags').value = (tmpl.defaultTags || []).join(', ');
+  document.getElementById('fAssignee').value = tmpl.defaultAssignee || 'Mike';
+  document.getElementById('fPriority').value = tmpl.defaultPriority || 'medium';
+}
+
 // Modal
 let activityOpen = false;
 let currentTaskActivity = [];
@@ -3030,6 +3069,13 @@ function openModal(task) {
     loadActivity(task.id);
   } else {
     actSection.style.display = 'none';
+  }
+
+  // Template dropdown — only for new cards
+  if (!task) {
+    loadTemplatesForModal(activeProjectId);
+  } else {
+    document.getElementById('templateSelectField').style.display = 'none';
   }
 
   // Attachments section — only for existing tasks
