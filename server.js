@@ -145,6 +145,59 @@ app.use('/api', (req, res, next) => {
   next();
 });
 
+// ─── SSE client registry ──────────────────────────────────────────────────────
+const DEFAULT_MAX_PROJECT_SSE_CONNECTIONS = 50;
+const configuredMaxProjectSseConnections = Number.parseInt(process.env.MAX_PROJECT_SSE_CONNECTIONS || '', 10);
+const MAX_PROJECT_SSE_CONNECTIONS = Number.isInteger(configuredMaxProjectSseConnections) && configuredMaxProjectSseConnections > 0
+  ? configuredMaxProjectSseConnections
+  : DEFAULT_MAX_PROJECT_SSE_CONNECTIONS;
+
+// Maps projectId → Map<response, { heartbeat: IntervalHandle }>
+const sseClients = new Map();
+
+function getProjectSseClients(projectId) {
+  if (!sseClients.has(projectId)) sseClients.set(projectId, new Map());
+  return sseClients.get(projectId);
+}
+
+function getProjectSseConnectionCount(projectId) {
+  return sseClients.get(projectId)?.size || 0;
+}
+
+function sseSubscribe(projectId, res, meta) {
+  getProjectSseClients(projectId).set(res, meta);
+}
+
+function sseUnsubscribe(projectId, res) {
+  const clients = sseClients.get(projectId);
+  if (!clients) return;
+  const meta = clients.get(res);
+  if (meta?.heartbeat) clearInterval(meta.heartbeat);
+  clients.delete(res);
+  if (clients.size === 0) sseClients.delete(projectId);
+}
+
+function sseBroadcast(projectId, eventType, data) {
+  const clients = sseClients.get(projectId);
+  if (!clients || clients.size === 0) return;
+
+  const payload = `event: ${eventType}
+data: ${JSON.stringify(data)}
+
+`;
+  for (const [clientRes] of clients) {
+    if (clientRes.destroyed || clientRes.writableEnded) {
+      sseUnsubscribe(projectId, clientRes);
+      continue;
+    }
+    try {
+      clientRes.write(payload);
+    } catch (err) {
+      sseUnsubscribe(projectId, clientRes);
+    }
+  }
+}
+
 // ─── Rate Limiting (in-memory, no external deps) ─────────────────────────────
 // Map<ip, Map<bucket, {count, resetAt}>>
 // Buckets: 'logs' (60/min), 'spawn' (20/min), 'write' (120/min)
@@ -841,6 +894,8 @@ app.post('/api/tasks', (req, res) => {
       'INSERT INTO card_activity (id, taskId, type, content, author, createdAt) VALUES (?, ?, ?, ?, ?, ?)'
     ).run(actId, task.id, 'created', `Card created in ${COL_LABELS[task.column] || task.column}`, task.assignee, task.createdAt);
 
+    sseBroadcast(task.projectId, 'task.created', { task });
+
     res.status(201).json(task);
   } catch (err) {
     console.error(err);
@@ -994,7 +1049,8 @@ app.put('/api/tasks/:id', (req, res) => {
   });
   updateTask();
 
-  // Fire webhooks outside the transaction (external side effects)
+  // Fire external side effects outside the transaction.
+  sseBroadcast(updated.projectId || 'default', 'task.updated', { task: updated });
   if (req.body.column && req.body.column !== existing.column) {
     fireWebhook(updated.projectId || 'default', 'task.updated', { task: { ...updated, tags: JSON.stringify(updated.tags) } });
     if (wavePromotionInfo) {
@@ -1191,7 +1247,11 @@ app.post('/api/tasks/:id/logs', (req, res) => {
       'INSERT INTO agent_logs (taskId, agentSessionId, level, message, timestamp) VALUES (?, ?, ?, ?, ?)'
     ).run(entry.taskId, entry.agentSessionId, entry.level, entry.message, entry.timestamp);
 
-    res.status(201).json({ id: result.lastInsertRowid, ...entry });
+    const logEntry = { id: result.lastInsertRowid, ...entry };
+    const taskRow = db.prepare('SELECT projectId FROM tasks WHERE id = ?').get(req.params.id);
+    sseBroadcast(taskRow?.projectId || 'default', 'log.created', { log: logEntry });
+
+    res.status(201).json(logEntry);
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Internal server error" });
@@ -1232,7 +1292,11 @@ app.get('/api/tasks/:id/logs', (req, res) => {
 // Delete task
 app.delete('/api/tasks/:id', (req, res) => {
   try {
+    const existing = db.prepare('SELECT id, projectId FROM tasks WHERE id = ?').get(req.params.id);
+    if (!existing) return res.status(404).json({ error: 'Not found' });
+
     db.prepare('DELETE FROM tasks WHERE id = ?').run(req.params.id);
+    sseBroadcast(existing.projectId || 'default', 'task.deleted', { taskId: req.params.id });
     res.status(204).end();
   } catch (err) {
     console.error('DELETE /api/tasks/:id error:', err);
@@ -1517,6 +1581,58 @@ app.delete('/api/attachments/:id', (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ─── Server-Sent Events ───────────────────────────────────────────────────────
+// GET /api/events?projectId=X
+// Streams task.created, task.updated, task.deleted, and log.created events.
+app.get('/api/events', (req, res) => {
+  const projectId = req.query.projectId || 'default';
+
+  if (getProjectSseConnectionCount(projectId) >= MAX_PROJECT_SSE_CONNECTIONS) {
+    return res.status(503).json({
+      error: 'Too many SSE connections for project',
+      projectId,
+      limit: MAX_PROJECT_SSE_CONNECTIONS,
+    });
+  }
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.flushHeaders();
+
+  let closed = false;
+  const closeConnection = () => {
+    if (closed) return;
+    closed = true;
+    sseUnsubscribe(projectId, res);
+  };
+
+  const heartbeat = setInterval(() => {
+    if (res.destroyed || res.writableEnded) {
+      closeConnection();
+      return;
+    }
+    try {
+      res.write(': heartbeat\n\n');
+    } catch (err) {
+      closeConnection();
+    }
+  }, 25000);
+
+  sseSubscribe(projectId, res, { heartbeat });
+
+  res.on('close', closeConnection);
+  res.on('error', closeConnection);
+  res.on('finish', closeConnection);
+
+  try {
+    res.write(`event: connected\ndata: ${JSON.stringify({ projectId, ts: new Date().toISOString() })}\n\n`);
+  } catch (err) {
+    closeConnection();
   }
 });
 
