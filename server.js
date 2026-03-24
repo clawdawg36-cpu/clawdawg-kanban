@@ -51,7 +51,9 @@ process.on('unhandledRejection', (err) => console.error('Unhandled rejection:', 
 const app = express();
 const PORT = 3456;
 
-const COL_LABELS = { 'backlog': 'Backlog', 'in-progress': 'In Progress', 'in-review': 'In Review', 'done': 'Done' };
+const COL_LABELS = { 'idea': 'Idea', 'backlog': 'Backlog', 'in-progress': 'In Progress', 'in-review': 'In Review', 'done': 'Done' };
+const VALID_PRIORITIES = ['urgent', 'high', 'medium', 'low'];
+const VALID_COLUMNS = ['idea', 'backlog', 'in-progress', 'in-review', 'done'];
 
 // ─── Security headers ─────────────────────────────────────────────────────────
 app.use(helmet({
@@ -483,6 +485,19 @@ app.post('/api/tasks/:id/release', (req, res) => {
 // Create task
 app.post('/api/tasks', (req, res) => {
   try {
+    // Input validation
+    if (req.body.priority !== undefined && !VALID_PRIORITIES.includes(req.body.priority)) {
+      return res.status(400).json({ error: `Invalid priority. Must be one of: ${VALID_PRIORITIES.join(', ')}` });
+    }
+    if (req.body.column !== undefined && !VALID_COLUMNS.includes(req.body.column)) {
+      return res.status(400).json({ error: `Invalid column. Must be one of: ${VALID_COLUMNS.join(', ')}` });
+    }
+    if (req.body.wave !== undefined && req.body.wave !== null) {
+      if (!Number.isInteger(req.body.wave) || req.body.wave < 0) {
+        return res.status(400).json({ error: 'Invalid wave. Must be null or a non-negative integer' });
+      }
+    }
+
     const blockedByArr = Array.isArray(req.body.blockedBy) ? req.body.blockedBy : [];
     const task = {
       id: Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
