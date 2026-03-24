@@ -82,7 +82,19 @@ app.get('/api/tasks', (req, res) => {
     WHERE lockExpiresAt IS NOT NULL AND lockExpiresAt < datetime('now')
   `).run();
   const rows = db.prepare("SELECT * FROM tasks WHERE projectId = ?").all(projectId);
-  res.json(rows.map(row => ({ ...row, tags: JSON.parse(row.tags), subtasks: row.subtasks ? JSON.parse(row.subtasks) : null })));
+  // Compute blocked status for each task
+  const allTasks = rows.map(r => r.id);
+  const deps = allTasks.length > 0
+    ? db.prepare(`SELECT blocker_id, blocked_id FROM task_dependencies WHERE blocked_id IN (${allTasks.map(() => '?').join(',')}) AND blocker_id IN (${allTasks.map(() => '?').join(',')})`).all(...allTasks, ...allTasks)
+    : [];
+  const doneIds = new Set(rows.filter(r => r.column === 'done').map(r => r.id));
+  res.json(rows.map(row => ({
+    ...row,
+    tags: JSON.parse(row.tags),
+    subtasks: row.subtasks ? JSON.parse(row.subtasks) : null,
+    blockedBy: row.blockedBy ? JSON.parse(row.blockedBy) : [],
+    blocked: deps.some(d => d.blocked_id === row.id && !doneIds.has(d.blocker_id)),
+  })));
 });
 
 // POST /api/tasks/:id/claim — atomically lock a card
@@ -167,9 +179,24 @@ app.put('/api/tasks/:id', (req, res) => {
     createdAt: existing.createdAt,
   };
 
+  // Handle blockedBy sync to task_dependencies
+  if (req.body.blockedBy !== undefined) {
+    const blockedByArr = Array.isArray(req.body.blockedBy) ? req.body.blockedBy : [];
+    updated.blockedBy = blockedByArr;
+    // Sync to task_dependencies: clear existing blockers for this task, re-insert from blockedBy
+    db.prepare('DELETE FROM task_dependencies WHERE blocked_id = ?').run(updated.id);
+    for (const blockerId of blockedByArr) {
+      if (blockerId !== updated.id) {
+        db.prepare('INSERT OR IGNORE INTO task_dependencies (blocker_id, blocked_id) VALUES (?, ?)').run(blockerId, updated.id);
+      }
+    }
+  } else {
+    updated.blockedBy = existing.blockedBy ? JSON.parse(existing.blockedBy) : [];
+  }
+
   db.prepare(
-    'UPDATE tasks SET title = ?, description = ?, assignee = ?, priority = ?, tags = ?, "column" = ?, dueDate = ?, recurring = ?, subtasks = ?, projectId = ? WHERE id = ?'
-  ).run(updated.title, updated.description, updated.assignee, updated.priority, JSON.stringify(updated.tags), updated.column, updated.dueDate || null, updated.recurring || null, updated.subtasks ? JSON.stringify(updated.subtasks) : null, updated.projectId || 'default', updated.id);
+    'UPDATE tasks SET title = ?, description = ?, assignee = ?, priority = ?, tags = ?, "column" = ?, dueDate = ?, recurring = ?, subtasks = ?, projectId = ?, blockedBy = ? WHERE id = ?'
+  ).run(updated.title, updated.description, updated.assignee, updated.priority, JSON.stringify(updated.tags), updated.column, updated.dueDate || null, updated.recurring || null, updated.subtasks ? JSON.stringify(updated.subtasks) : null, updated.projectId || 'default', JSON.stringify(updated.blockedBy), updated.id);
 
   // Auto-log column changes
   if (req.body.column && req.body.column !== existing.column) {
@@ -198,6 +225,25 @@ app.put('/api/tasks/:id', (req, res) => {
   }
 
   res.json(updated);
+});
+
+// Get single task
+app.get('/api/tasks/:id', (req, res) => {
+  const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id);
+  if (!task) return res.status(404).json({ error: 'Not found' });
+  // Get blockers and compute blocked status
+  const blockerIds = db.prepare('SELECT blocker_id FROM task_dependencies WHERE blocked_id = ?').all(task.id).map(r => r.blocker_id);
+  const activeBlockers = blockerIds.filter(bid => {
+    const b = db.prepare('SELECT "column" FROM tasks WHERE id = ?').get(bid);
+    return b && b.column !== 'done';
+  });
+  res.json({
+    ...task,
+    tags: JSON.parse(task.tags),
+    subtasks: task.subtasks ? JSON.parse(task.subtasks) : null,
+    blockedBy: task.blockedBy ? JSON.parse(task.blockedBy) : [],
+    blocked: activeBlockers.length > 0,
+  });
 });
 
 // Delete task

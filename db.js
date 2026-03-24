@@ -91,6 +91,10 @@ if (!cols.includes('lockExpiresAt')) {
   db.exec('ALTER TABLE tasks ADD COLUMN lockExpiresAt TEXT DEFAULT NULL');
   console.log('Migrated: added lockExpiresAt column to tasks table');
 }
+if (!cols.includes('blockedBy')) {
+  db.exec("ALTER TABLE tasks ADD COLUMN blockedBy TEXT DEFAULT '[]'");
+  console.log('Migrated: added blockedBy column to tasks table');
+}
 
 // Ensure default project exists and assign orphaned tasks to it
 const defaultProject = db.prepare("SELECT id FROM projects WHERE id = 'default'").get();
