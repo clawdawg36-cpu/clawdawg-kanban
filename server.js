@@ -55,6 +55,8 @@ const COL_LABELS = { 'idea': 'Idea', 'backlog': 'Backlog', 'in-progress': 'In Pr
 const VALID_PRIORITIES = ['urgent', 'high', 'medium', 'low'];
 const VALID_COLUMNS = ['idea', 'backlog', 'in-progress', 'in-review', 'done'];
 const MAX_AGENT_LOG_MESSAGE_BYTES = 10 * 1024;
+const SAFE_AGENT_MODEL_REGEX = /^[a-zA-Z0-9/_.-]+$/;
+const MAX_SPAWN_TASK_DESCRIPTION_LENGTH = 4000;
 const DEFAULT_TEMPLATE_SUBAGENTS_PATH_TOKEN = '{{KANBAN_SUBAGENTS_PATH}}';
 const DEFAULT_TEMPLATE_AGENT_PHONE_TOKEN = '{{KANBAN_AGENT_PHONE}}';
 const DEFAULT_TEMPLATE_SUBAGENTS_PATH = process.env.KANBAN_SUBAGENTS_PATH || DEFAULT_TEMPLATE_SUBAGENTS_PATH_TOKEN;
@@ -145,6 +147,20 @@ function getTaskLockExpiryIso(project) {
   const timeoutSeconds = Number(agentConfig.timeoutSeconds);
   const ttlSeconds = Number.isFinite(timeoutSeconds) && timeoutSeconds > 0 ? timeoutSeconds : 600;
   return new Date(Date.now() + ttlSeconds * 1000).toISOString();
+}
+
+function getValidatedAgentModel(agentConfig) {
+  if (!agentConfig?.model) return null;
+  if (typeof agentConfig.model !== 'string') return null;
+  const trimmedModel = agentConfig.model.trim();
+  if (!trimmedModel) return null;
+  return SAFE_AGENT_MODEL_REGEX.test(trimmedModel) ? trimmedModel : null;
+}
+
+function truncateSpawnTaskDescription(description) {
+  if (typeof description !== 'string' || !description) return '';
+  if (description.length <= MAX_SPAWN_TASK_DESCRIPTION_LENGTH) return description;
+  return `${description.slice(0, MAX_SPAWN_TASK_DESCRIPTION_LENGTH)}\n\n[truncated]`;
 }
 
 // ─── Security headers ─────────────────────────────────────────────────────────
@@ -556,6 +572,9 @@ app.put('/api/projects/:id', (req, res) => {
     if (!existing) return res.status(404).json({ error: 'Not found' });
     if (req.body.agentConfig !== undefined && req.body.agentConfig !== null && typeof req.body.agentConfig !== 'object') {
       return res.status(400).json({ error: 'agentConfig must be an object or null' });
+    }
+    if (req.body.agentConfig && req.body.agentConfig.model !== undefined && getValidatedAgentModel(req.body.agentConfig) === null) {
+      return res.status(400).json({ error: 'agentConfig.model must match /^[a-zA-Z0-9\\/_.-]+$/' });
     }
     const updated = {
       name: req.body.name !== undefined ? req.body.name : existing.name,
@@ -1032,6 +1051,128 @@ app.post('/api/tasks/:id/release', (req, res) => {
   }
 });
 
+// POST /api/tasks/:id/complete — atomically move to done, release lock, and optionally append handoff note
+app.post('/api/tasks/:id/complete', (req, res) => {
+  try {
+    const agentSessionId = typeof req.body.agentSessionId === 'string' ? req.body.agentSessionId.trim() : '';
+    const handoffMessage = typeof req.body.message === 'string' ? req.body.message.trim() : '';
+
+    if (!agentSessionId) {
+      return res.status(400).json({ error: 'agentSessionId is required and must be a non-empty string' });
+    }
+
+    const existing = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id);
+    if (!existing) return res.status(404).json({ error: 'Not found' });
+
+    if (existing.lockedBy !== agentSessionId) {
+      return res.status(403).json({ error: 'Not the lock owner' });
+    }
+
+    const updated = {
+      ...existing,
+      tags: JSON.parse(existing.tags || '[]'),
+      subtasks: existing.subtasks ? JSON.parse(existing.subtasks) : null,
+      blockedBy: existing.blockedBy ? JSON.parse(existing.blockedBy) : [],
+      column: 'done',
+      lockedBy: null,
+      lockedAt: null,
+      lockExpiresAt: null,
+    };
+
+    let promotedWaveTasks = [];
+    let wavePromotionInfo = null;
+    let unblockedTasks = [];
+
+    const completeTask = db.transaction(() => {
+      db.prepare('UPDATE tasks SET "column" = ?, lockedBy = NULL, lockedAt = NULL, lockExpiresAt = NULL WHERE id = ?')
+        .run('done', existing.id);
+
+      if (handoffMessage) {
+        const log = existing.handoffLog ? JSON.parse(existing.handoffLog) : [];
+        log.push({
+          agentId: agentSessionId,
+          timestamp: new Date().toISOString(),
+          message: handoffMessage,
+        });
+        db.prepare('UPDATE tasks SET handoffLog = ? WHERE id = ?').run(JSON.stringify(log), existing.id);
+      }
+
+      const now = new Date().toISOString();
+      const actId = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+      db.prepare(
+        'INSERT INTO card_activity (id, taskId, type, content, author, createdAt) VALUES (?, ?, ?, ?, ?, ?)'
+      ).run(actId, existing.id, 'move', `Moved from ${COL_LABELS[existing.column] || existing.column} → ${COL_LABELS.done}`, 'System', now);
+
+      db.prepare(
+        'INSERT INTO notifications (task_id, task_title, from_col, to_col, changed_by, created_at, project_id) VALUES (?, ?, ?, ?, ?, ?, ?)'
+      ).run(existing.id, existing.title, existing.column, 'done', existing.assignee || 'System', now, existing.projectId || 'default');
+
+      if (existing.recurring) {
+        const newId = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+        const newCreatedAt = new Date().toISOString();
+        db.prepare(
+          'INSERT INTO tasks (id, title, description, assignee, priority, tags, "column", createdAt, recurring, subtasks, projectId, wave) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        ).run(newId, existing.title, existing.description, existing.assignee, existing.priority, existing.tags, 'backlog', newCreatedAt, existing.recurring, null, existing.projectId || 'default', existing.wave || null);
+        const recActId = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+        db.prepare(
+          'INSERT INTO card_activity (id, taskId, type, content, author, createdAt) VALUES (?, ?, ?, ?, ?, ?)'
+        ).run(recActId, newId, 'created', `Recurring card created (${existing.recurring}) from completed task`, 'System', newCreatedAt);
+      }
+
+      if (existing.wave != null) {
+        const projectId = existing.projectId || 'default';
+        const waveTasks = db.prepare('SELECT id, "column" FROM tasks WHERE projectId = ? AND wave = ?').all(projectId, existing.wave);
+        const allDone = waveTasks.every(t => t.id === existing.id ? true : t.column === 'done');
+        if (allDone) {
+          const nextWaveTasks = db.prepare('SELECT id FROM tasks WHERE projectId = ? AND wave = ? AND "column" = \'idea\'').all(projectId, existing.wave + 1);
+          if (nextWaveTasks.length > 0) {
+            const promoteStmt = db.prepare('UPDATE tasks SET "column" = \'backlog\' WHERE id = ?');
+            for (const t of nextWaveTasks) promoteStmt.run(t.id);
+            promotedWaveTasks = nextWaveTasks;
+          }
+          wavePromotionInfo = { wave: existing.wave, nextWave: existing.wave + 1, promotedCount: nextWaveTasks.length, projectId };
+        }
+      }
+
+      const unblocked = db.prepare('SELECT blocked_id FROM task_dependencies WHERE blocker_id = ?').all(existing.id);
+      for (const dep of unblocked) {
+        const blockedTask = db.prepare('SELECT * FROM tasks WHERE id = ?').get(dep.blocked_id);
+        if (blockedTask) {
+          const remainingBlockers = db.prepare("SELECT td.blocker_id FROM task_dependencies td INNER JOIN tasks t ON t.id = td.blocker_id WHERE td.blocked_id = ? AND t.column != 'done'").all(dep.blocked_id);
+          if (remainingBlockers.length === 0) {
+            unblockedTasks.push({ taskId: dep.blocked_id, task: blockedTask });
+          }
+        }
+      }
+    });
+
+    completeTask();
+
+    const finalTask = db.prepare('SELECT * FROM tasks WHERE id = ?').get(existing.id);
+    const responseTask = {
+      ...finalTask,
+      tags: JSON.parse(finalTask.tags || '[]'),
+      subtasks: finalTask.subtasks ? JSON.parse(finalTask.subtasks) : null,
+      blockedBy: finalTask.blockedBy ? JSON.parse(finalTask.blockedBy) : [],
+      handoffLog: finalTask.handoffLog ? JSON.parse(finalTask.handoffLog) : [],
+    };
+
+    sseBroadcast(responseTask.projectId || 'default', 'task.updated', { task: responseTask });
+    fireWebhook(responseTask.projectId || 'default', 'task.updated', { task: { ...responseTask, tags: JSON.stringify(responseTask.tags) } });
+    if (wavePromotionInfo) {
+      fireWebhook(wavePromotionInfo.projectId, 'layer.unlocked', wavePromotionInfo);
+    }
+    for (const u of unblockedTasks) {
+      fireWebhook(u.task.projectId || 'default', 'task.unblocked', { taskId: u.taskId, task: u.task });
+    }
+
+    res.json(responseTask);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 // Create task
 app.post('/api/tasks', (req, res) => {
   try {
@@ -1303,6 +1444,11 @@ app.post('/api/tasks/:id/spawn', async (req, res) => {
     // Read project agentConfig for model/timeout overrides
     const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(task.projectId || 'default');
     const agentConfig = parseProjectAgentConfig(project);
+    const validatedAgentModel = getValidatedAgentModel(agentConfig);
+
+    if (agentConfig.model && !validatedAgentModel) {
+      return res.status(400).json({ error: 'Invalid project agent model configuration' });
+    }
 
     // Read auth token from openclaw.json (gateway.auth.token)
     let authToken = process.env.OPENCLAW_TOKEN;
@@ -1316,9 +1462,10 @@ app.post('/api/tasks/:id/spawn', async (req, res) => {
     }
 
     // Build task prompt
+    const safeTaskDescription = truncateSpawnTaskDescription(task.description);
     const taskDetails = [
       `# Task: ${task.title}`,
-      task.description ? `\n## Description\n${task.description}` : '',
+      safeTaskDescription ? `\n## Description\n${safeTaskDescription}` : '',
       `\n## Card ID\n${task.id}`,
       `\n## Project\n${task.projectId || 'default'}`,
       `\n## Priority\n${task.priority}`,
@@ -1340,7 +1487,7 @@ app.post('/api/tasks/:id/spawn', async (req, res) => {
       '--session-id', sessionKey,
       '--message', taskPrompt,
     ];
-    if (agentConfig.model) agentArgs.push('--agent', agentConfig.model);
+    if (validatedAgentModel) agentArgs.push('--agent', validatedAgentModel);
 
     const env = { ...process.env, HOME: require('os').homedir() };
     if (authToken) env.OPENCLAW_TOKEN = authToken;
@@ -1362,7 +1509,7 @@ app.post('/api/tasks/:id/spawn', async (req, res) => {
       projectId: task.projectId || 'default',
       sessionKey,
       title: task.title,
-      model: agentConfig.model || null,
+      model: validatedAgentModel || null,
     });
 
     res.json({ sessionKey, sessionId: sessionKey, taskId: task.id, status: 'spawned' });
