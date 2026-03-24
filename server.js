@@ -1365,6 +1365,24 @@ app.get('/api/stats', (req, res) => {
   }
 });
 
+// ─── Health Check ─────────────────────────────────────────────────────────────
+app.get('/api/health', (req, res) => {
+  let dbStatus = 'ok';
+  try {
+    db.prepare('SELECT 1').get();
+  } catch (err) {
+    dbStatus = 'error';
+  }
+  const healthy = dbStatus === 'ok';
+  res.status(healthy ? 200 : 503).json({
+    status: healthy ? 'ok' : 'degraded',
+    uptime: process.uptime(),
+    db: dbStatus,
+    port: PORT,
+    timestamp: new Date().toISOString(),
+  });
+});
+
 // ─── Startup: seed default 'agent-task' template for projects that have none ──
 (function seedDefaultTemplates() {
   const DEFAULT_DESCRIPTION = `Read /Users/mike/.openclaw/workspace/SUBAGENTS.md first — it has everything you need: git workflow, notifications, kanban API, conflict avoidance, and ground rules.
