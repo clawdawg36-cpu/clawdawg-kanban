@@ -86,7 +86,11 @@ app.use('/api', (req, res, next) => {
   const token = process.env.KANBAN_API_KEY;
   if (!token) return next(); // no key configured = open mode
   const auth = req.headers.authorization || '';
-  if (auth !== `Bearer ${token}`) return res.status(401).json({ error: 'Unauthorized' });
+  const provided = Buffer.from(auth.replace('Bearer ', ''), 'utf8');
+  const expected = Buffer.from(token, 'utf8');
+  if (provided.length !== expected.length || !require('crypto').timingSafeEqual(provided, expected)) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
   next();
 });
 
