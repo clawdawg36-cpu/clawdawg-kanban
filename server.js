@@ -1402,6 +1402,182 @@ app.put('/api/tasks/:id', (req, res) => {
   }
 });
 
+// PATCH /api/tasks/:id — partial update (only supplied fields)
+app.patch('/api/tasks/:id', (req, res) => {
+  try {
+    const existing = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id);
+    if (!existing) return res.status(404).json({ error: 'Not found' });
+
+    // Input validation
+    if (req.body.priority !== undefined && !VALID_PRIORITIES.includes(req.body.priority)) {
+      return res.status(400).json({ error: `Invalid priority. Must be one of: ${VALID_PRIORITIES.join(', ')}` });
+    }
+    if (req.body.column !== undefined && !VALID_COLUMNS.includes(req.body.column)) {
+      return res.status(400).json({ error: `Invalid column. Must be one of: ${VALID_COLUMNS.join(', ')}` });
+    }
+    if (req.body.wave !== undefined && req.body.wave !== null) {
+      if (!Number.isInteger(req.body.wave) || req.body.wave < 0) {
+        return res.status(400).json({ error: 'Invalid wave. Must be null or a non-negative integer' });
+      }
+    }
+
+    const ALLOWED_PATCH_FIELDS = ['title', 'description', 'assignee', 'priority', 'column', 'tags', 'dueDate', 'recurring', 'subtasks', 'wave', 'blockedBy', 'sortOrder'];
+
+    // Collect only the fields the caller actually sent
+    const patches = {};
+    for (const field of ALLOWED_PATCH_FIELDS) {
+      if (req.body[field] !== undefined) patches[field] = req.body[field];
+    }
+
+    if (Object.keys(patches).length === 0) {
+      return res.status(400).json({ error: 'No valid fields to update' });
+    }
+
+    // Validate blockedBy IDs if provided
+    if (patches.blockedBy !== undefined) {
+      patches.blockedBy = Array.isArray(patches.blockedBy) ? patches.blockedBy : [];
+      const taskProjectId = patches.projectId || existing.projectId || 'default';
+      for (const blockerId of patches.blockedBy) {
+        const blockerRow = db.prepare('SELECT id, projectId FROM tasks WHERE id = ?').get(blockerId);
+        if (!blockerRow) {
+          return res.status(400).json({ error: `Blocker task ${blockerId} does not exist` });
+        }
+        if (blockerRow.projectId !== taskProjectId) {
+          return res.status(400).json({ error: `Blocker task ${blockerId} belongs to a different project and cannot block this task` });
+        }
+      }
+    }
+
+    // Build dynamic UPDATE — only touch supplied columns
+    const setClauses = [];
+    const params = [];
+
+    for (const [field, value] of Object.entries(patches)) {
+      if (field === 'tags') {
+        setClauses.push('tags = ?');
+        params.push(JSON.stringify(Array.isArray(value) ? value : []));
+      } else if (field === 'subtasks') {
+        setClauses.push('subtasks = ?');
+        params.push(value ? JSON.stringify(value) : null);
+      } else if (field === 'blockedBy') {
+        setClauses.push('blockedBy = ?');
+        params.push(JSON.stringify(value));
+      } else if (field === 'column') {
+        setClauses.push('"column" = ?');
+        params.push(value);
+      } else {
+        setClauses.push(`${field} = ?`);
+        params.push(value ?? null);
+      }
+    }
+
+    params.push(req.params.id);
+
+    // Track side-effect data for after the transaction
+    let promotedWaveTasks = [];
+    let wavePromotionInfo = null;
+    let unblockedTasks = [];
+
+    const patchTask = db.transaction(() => {
+      db.prepare(`UPDATE tasks SET ${setClauses.join(', ')} WHERE id = ?`).run(...params);
+
+      // Sync blockedBy to task_dependencies if changed
+      if (patches.blockedBy !== undefined) {
+        db.prepare('DELETE FROM task_dependencies WHERE blocked_id = ?').run(existing.id);
+        for (const blockerId of patches.blockedBy) {
+          if (blockerId !== existing.id) {
+            db.prepare('INSERT OR IGNORE INTO task_dependencies (blocker_id, blocked_id) VALUES (?, ?)').run(blockerId, existing.id);
+          }
+        }
+      }
+
+      // Auto-log column changes
+      if (patches.column && patches.column !== existing.column) {
+        const now = new Date().toISOString();
+        const actId = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+        db.prepare(
+          'INSERT INTO card_activity (id, taskId, type, content, author, createdAt) VALUES (?, ?, ?, ?, ?, ?)'
+        ).run(actId, existing.id, 'move', `Moved from ${COL_LABELS[existing.column] || existing.column} → ${COL_LABELS[patches.column] || patches.column}`, 'System', now);
+        db.prepare(
+          'INSERT INTO notifications (task_id, task_title, from_col, to_col, changed_by, created_at, project_id) VALUES (?, ?, ?, ?, ?, ?, ?)'
+        ).run(existing.id, existing.title, existing.column, patches.column, patches.assignee || existing.assignee || 'System', now, existing.projectId || 'default');
+
+        // Recurring task: auto-create new card when moved to done
+        if (patches.column === 'done' && existing.recurring) {
+          const newId = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+          const newCreatedAt = new Date().toISOString();
+          db.prepare(
+            'INSERT INTO tasks (id, title, description, assignee, priority, tags, "column", createdAt, recurring, subtasks, projectId, wave) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+          ).run(newId, existing.title, existing.description, existing.assignee, existing.priority, existing.tags, 'backlog', newCreatedAt, existing.recurring, null, existing.projectId || 'default', existing.wave || null);
+          const recActId = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+          db.prepare(
+            'INSERT INTO card_activity (id, taskId, type, content, author, createdAt) VALUES (?, ?, ?, ?, ?, ?)'
+          ).run(recActId, newId, 'created', `Recurring card created (${existing.recurring}) from completed task`, 'System', newCreatedAt);
+        }
+
+        // Wave auto-promotion
+        const effectiveWave = patches.wave !== undefined ? patches.wave : existing.wave;
+        if (patches.column === 'done' && effectiveWave != null) {
+          const projectId = existing.projectId || 'default';
+          const waveN = effectiveWave;
+          const waveTasks = db.prepare("SELECT id, \"column\" FROM tasks WHERE projectId = ? AND wave = ?").all(projectId, waveN);
+          const allDone = waveTasks.every(t => t.id === existing.id ? true : t.column === 'done');
+          if (allDone) {
+            const nextWaveTasks = db.prepare("SELECT id FROM tasks WHERE projectId = ? AND wave = ? AND \"column\" = 'idea'").all(projectId, waveN + 1);
+            if (nextWaveTasks.length > 0) {
+              const promoteStmt = db.prepare("UPDATE tasks SET \"column\" = 'backlog' WHERE id = ?");
+              for (const t of nextWaveTasks) promoteStmt.run(t.id);
+              promotedWaveTasks = nextWaveTasks;
+            }
+            wavePromotionInfo = { wave: waveN, nextWave: waveN + 1, promotedCount: nextWaveTasks ? nextWaveTasks.length : 0, projectId };
+          }
+        }
+
+        // Collect unblocked tasks
+        if (patches.column === 'done') {
+          const unblocked = db.prepare("SELECT blocked_id FROM task_dependencies WHERE blocker_id = ?").all(existing.id);
+          for (const dep of unblocked) {
+            const blockedTask = db.prepare("SELECT * FROM tasks WHERE id = ?").get(dep.blocked_id);
+            if (blockedTask) {
+              const remainingBlockers = db.prepare("SELECT td.blocker_id FROM task_dependencies td INNER JOIN tasks t ON t.id = td.blocker_id WHERE td.blocked_id = ? AND t.column != 'done'").all(dep.blocked_id);
+              if (remainingBlockers.length === 0) {
+                unblockedTasks.push({ taskId: dep.blocked_id, task: blockedTask });
+              }
+            }
+          }
+        }
+      }
+    });
+    patchTask();
+
+    // Re-read the updated task to return it
+    const result = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id);
+    const response = {
+      ...result,
+      tags: JSON.parse(result.tags),
+      subtasks: result.subtasks ? JSON.parse(result.subtasks) : null,
+      blockedBy: result.blockedBy ? JSON.parse(result.blockedBy) : [],
+    };
+
+    // Fire external side effects outside the transaction
+    sseBroadcast(existing.projectId || 'default', 'task.updated', { task: response });
+    if (patches.column && patches.column !== existing.column) {
+      fireWebhook(existing.projectId || 'default', 'task.updated', { task: { ...response, tags: JSON.stringify(response.tags) } });
+      if (wavePromotionInfo) {
+        fireWebhook(wavePromotionInfo.projectId, 'layer.unlocked', wavePromotionInfo);
+      }
+      for (const u of unblockedTasks) {
+        fireWebhook(u.task.projectId || 'default', 'task.unblocked', { taskId: u.taskId, task: u.task });
+      }
+    }
+
+    res.json(response);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 // Get single task
 app.get('/api/tasks/:id', (req, res) => {
   try {
