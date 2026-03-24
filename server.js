@@ -18,6 +18,8 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage, limits: { fileSize: 50 * 1024 * 1024 } }); // 50MB limit
 
+process.on('unhandledRejection', (err) => console.error('Unhandled rejection:', err));
+
 const app = express();
 const PORT = 3456;
 
@@ -86,11 +88,12 @@ app.post('/api/projects', (req, res) => {
   ).run(project.id, project.name, project.color, project.emoji, project.createdAt);
   // Create default agent-task template for new project
   const tmplId = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+  const newProjDefaultDesc = `Read /Users/mike/.openclaw/workspace/SUBAGENTS.md first — it has everything you need: git workflow, notifications, kanban API, conflict avoidance, and ground rules.\n\n## Task\n\n[describe task here]\n\n## Git Workflow\n\n\`\`\`bash\ncd /path/to/repo\ngit pull origin main\ngit add -A\ngit commit -m "feat|fix|chore: short description"\ngh auth switch --user clawdawg36-cpu\ngit push\ngh auth switch --user mikejwhitehead\n\`\`\`\n\n## Notifications\n\nSend a BlueBubbles message to +18183121807:\n- START: "🔨 Starting: [task title]"\n- FINISH: "✅ Done: [task title]\\n[2-3 sentences on what changed]"\n- BLOCKER: "⚠️ Blocked: [task title]\\n[what you need and why]"`;
   db.prepare(
     'INSERT INTO templates (id, projectId, name, defaultDescription, defaultTags, defaultAssignee, defaultPriority, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
   ).run(
     tmplId, project.id, 'agent-task',
-    'Read /Users/mike/.openclaw/workspace/SUBAGENTS.md first.\n\n## Task\n\n[describe task here]\n\n## Git workflow\ngit pull origin main before starting.\nCommit as clawdawg36-cpu.\n\n## Notification\nText Mike at +18183121807 when done.',
+    newProjDefaultDesc,
     JSON.stringify(['agent', 'automation']),
     'ClawDawg', 'medium', new Date().toISOString()
   );
@@ -124,33 +127,45 @@ app.delete('/api/projects/:id', (req, res) => {
 
 // GET /api/templates?projectId=x
 app.get('/api/templates', (req, res) => {
-  const projectId = req.query.projectId || 'default';
-  const rows = db.prepare('SELECT * FROM templates WHERE projectId = ? ORDER BY createdAt ASC').all(projectId);
-  res.json(rows.map(r => ({ ...r, defaultTags: JSON.parse(r.defaultTags) })));
+  try {
+    const projectId = req.query.projectId || 'default';
+    const rows = db.prepare('SELECT * FROM templates WHERE projectId = ? ORDER BY createdAt ASC').all(projectId);
+    res.json(rows.map(r => ({ ...r, defaultTags: JSON.parse(r.defaultTags) })));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // POST /api/templates
 app.post('/api/templates', (req, res) => {
-  const tmpl = {
-    id: Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
-    projectId: req.body.projectId || 'default',
-    name: req.body.name || 'New Template',
-    defaultDescription: req.body.defaultDescription || '',
-    defaultTags: req.body.defaultTags || [],
-    defaultAssignee: req.body.defaultAssignee || 'Mike',
-    defaultPriority: req.body.defaultPriority || 'medium',
-    createdAt: new Date().toISOString(),
-  };
-  db.prepare(
-    'INSERT INTO templates (id, projectId, name, defaultDescription, defaultTags, defaultAssignee, defaultPriority, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
-  ).run(tmpl.id, tmpl.projectId, tmpl.name, tmpl.defaultDescription, JSON.stringify(tmpl.defaultTags), tmpl.defaultAssignee, tmpl.defaultPriority, tmpl.createdAt);
-  res.status(201).json({ ...tmpl });
+  try {
+    const tmpl = {
+      id: Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
+      projectId: req.body.projectId || 'default',
+      name: req.body.name || 'New Template',
+      defaultDescription: req.body.defaultDescription || '',
+      defaultTags: req.body.defaultTags || [],
+      defaultAssignee: req.body.defaultAssignee || 'Mike',
+      defaultPriority: req.body.defaultPriority || 'medium',
+      createdAt: new Date().toISOString(),
+    };
+    db.prepare(
+      'INSERT INTO templates (id, projectId, name, defaultDescription, defaultTags, defaultAssignee, defaultPriority, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+    ).run(tmpl.id, tmpl.projectId, tmpl.name, tmpl.defaultDescription, JSON.stringify(tmpl.defaultTags), tmpl.defaultAssignee, tmpl.defaultPriority, tmpl.createdAt);
+    res.status(201).json({ ...tmpl });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // DELETE /api/templates/:id
 app.delete('/api/templates/:id', (req, res) => {
-  db.prepare('DELETE FROM templates WHERE id = ?').run(req.params.id);
-  res.status(204).end();
+  try {
+    db.prepare('DELETE FROM templates WHERE id = ?').run(req.params.id);
+    res.status(204).end();
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ─── Tasks ────────────────────────────────────────────────────────────────────
@@ -165,17 +180,13 @@ app.get('/api/tasks', (req, res) => {
   `).run();
   const rows = db.prepare("SELECT * FROM tasks WHERE projectId = ?").all(projectId);
   // Compute blocked status for each task
-  const allTasks = rows.map(r => r.id);
-  const deps = allTasks.length > 0
-    ? db.prepare(`SELECT blocker_id, blocked_id FROM task_dependencies WHERE blocked_id IN (${allTasks.map(() => '?').join(',')}) AND blocker_id IN (${allTasks.map(() => '?').join(',')})`).all(...allTasks, ...allTasks)
-    : [];
   const doneIds = new Set(rows.filter(r => r.column === 'done').map(r => r.id));
   res.json(rows.map(row => ({
     ...row,
     tags: JSON.parse(row.tags),
     subtasks: row.subtasks ? JSON.parse(row.subtasks) : null,
     blockedBy: row.blockedBy ? JSON.parse(row.blockedBy) : [],
-    blocked: deps.some(d => d.blocked_id === row.id && !doneIds.has(d.blocker_id)),
+    blocked: (row.blockedBy ? JSON.parse(row.blockedBy) : []).some(id => !doneIds.has(id)),
     handoffLog: row.handoffLog ? JSON.parse(row.handoffLog) : [],
     agentStatus: (() => {
       if (row.column === 'done') return 'done';
@@ -190,42 +201,50 @@ app.get('/api/tasks', (req, res) => {
 
 // POST /api/tasks/:id/claim — atomically lock a card
 app.post('/api/tasks/:id/claim', (req, res) => {
-  const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id);
-  if (!task) return res.status(404).json({ error: 'Not found' });
+  try {
+    const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id);
+    if (!task) return res.status(404).json({ error: 'Not found' });
 
-  // Check if task is currently locked by someone else
-  if (task.lockedBy && task.lockExpiresAt) {
-    const expiry = db.prepare("SELECT lockExpiresAt > datetime('now') as active FROM tasks WHERE id = ?").get(req.params.id);
-    if (expiry && expiry.active) {
-      return res.status(409).json({ error: 'Task already locked', lockedBy: task.lockedBy, lockExpiresAt: task.lockExpiresAt });
+    // Check if task is currently locked by someone else
+    if (task.lockedBy && task.lockExpiresAt) {
+      const expiry = db.prepare("SELECT lockExpiresAt > datetime('now') as active FROM tasks WHERE id = ?").get(req.params.id);
+      if (expiry && expiry.active) {
+        return res.status(409).json({ error: 'Task already locked', lockedBy: task.lockedBy, lockExpiresAt: task.lockExpiresAt });
+      }
     }
+
+    const now = new Date().toISOString();
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+    const agentSessionId = req.body.agentSessionId;
+
+    db.prepare('UPDATE tasks SET lockedBy = ?, lockedAt = ?, lockExpiresAt = ?, agentSessionId = ?, agentStartedAt = ? WHERE id = ?')
+      .run(agentSessionId, now, expiresAt, agentSessionId, now, req.params.id);
+
+    const updated = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id);
+    res.json({ ...updated, tags: JSON.parse(updated.tags), subtasks: updated.subtasks ? JSON.parse(updated.subtasks) : null });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
-
-  const now = new Date().toISOString();
-  const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
-  const agentSessionId = req.body.agentSessionId;
-
-  db.prepare('UPDATE tasks SET lockedBy = ?, lockedAt = ?, lockExpiresAt = ?, agentSessionId = ?, agentStartedAt = ? WHERE id = ?')
-    .run(agentSessionId, now, expiresAt, agentSessionId, now, req.params.id);
-
-  const updated = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id);
-  res.json({ ...updated, tags: JSON.parse(updated.tags), subtasks: updated.subtasks ? JSON.parse(updated.subtasks) : null });
 });
 
 // POST /api/tasks/:id/release — release a lock
 app.post('/api/tasks/:id/release', (req, res) => {
-  const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id);
-  if (!task) return res.status(404).json({ error: 'Not found' });
+  try {
+    const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id);
+    if (!task) return res.status(404).json({ error: 'Not found' });
 
-  if (task.lockedBy !== req.body.agentSessionId) {
-    return res.status(403).json({ error: 'Not the lock owner' });
+    if (task.lockedBy !== req.body.agentSessionId) {
+      return res.status(403).json({ error: 'Not the lock owner' });
+    }
+
+    db.prepare('UPDATE tasks SET lockedBy = NULL, lockedAt = NULL, lockExpiresAt = NULL WHERE id = ?')
+      .run(req.params.id);
+
+    const updated = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id);
+    res.json({ ...updated, tags: JSON.parse(updated.tags), subtasks: updated.subtasks ? JSON.parse(updated.subtasks) : null });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
-
-  db.prepare('UPDATE tasks SET lockedBy = NULL, lockedAt = NULL, lockExpiresAt = NULL WHERE id = ?')
-    .run(req.params.id);
-
-  const updated = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id);
-  res.json({ ...updated, tags: JSON.parse(updated.tags), subtasks: updated.subtasks ? JSON.parse(updated.subtasks) : null });
 });
 
 // Create task
@@ -750,6 +769,51 @@ app.get('/api/stats', (req, res) => {
 
   res.json({ projectId, projectName, totalByAssignee, completedThisWeek, overdueCount, columnCounts, avgTimeToComplete });
 });
+
+// ─── Startup: seed default 'agent-task' template for projects that have none ──
+(function seedDefaultTemplates() {
+  const DEFAULT_DESCRIPTION = `Read /Users/mike/.openclaw/workspace/SUBAGENTS.md first — it has everything you need: git workflow, notifications, kanban API, conflict avoidance, and ground rules.
+
+## Task
+
+[describe task here]
+
+## Git Workflow
+
+\`\`\`bash
+cd /path/to/repo
+git pull origin main
+git add -A
+git commit -m "feat|fix|chore: short description"
+gh auth switch --user clawdawg36-cpu
+git push
+gh auth switch --user mikejwhitehead
+\`\`\`
+
+## Notifications
+
+Send a BlueBubbles message to +18183121807:
+- START: "🔨 Starting: [task title]"
+- FINISH: "✅ Done: [task title]\\n[2-3 sentences on what changed]"
+- BLOCKER: "⚠️ Blocked: [task title]\\n[what you need and why]"`;
+
+  const projects = db.prepare('SELECT id FROM projects').all();
+  for (const project of projects) {
+    const existing = db.prepare('SELECT id FROM templates WHERE projectId = ?').get(project.id);
+    if (!existing) {
+      const tmplId = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+      db.prepare(
+        'INSERT INTO templates (id, projectId, name, defaultDescription, defaultTags, defaultAssignee, defaultPriority, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+      ).run(
+        tmplId, project.id, 'agent-task',
+        DEFAULT_DESCRIPTION,
+        JSON.stringify(['agent', 'automation']),
+        'ClawDawg', 'medium', new Date().toISOString()
+      );
+      console.log(`Seeded default agent-task template for project: ${project.id}`);
+    }
+  }
+})();
 
 app.listen(PORT, () => {
   console.log(`Kanban board running at http://localhost:${PORT}`);
