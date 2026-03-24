@@ -178,4 +178,16 @@ db.exec(`
   )
 `);
 
+// Webhooks table
+db.exec(`
+  CREATE TABLE IF NOT EXISTS webhooks (
+    id TEXT PRIMARY KEY,
+    projectId TEXT NOT NULL,
+    url TEXT NOT NULL,
+    events TEXT DEFAULT '[]',
+    secret TEXT DEFAULT NULL,
+    createdAt TEXT NOT NULL
+  )
+`);
+
 module.exports = db;

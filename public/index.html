@@ -2558,6 +2558,14 @@ input[type="date"] {
         </div>
       </div>
     </div>
+    <div class="field">
+      <label>🔔 Webhooks</label>
+      <div id="webhookList" style="margin-bottom:8px;display:flex;flex-direction:column;gap:6px"></div>
+      <div style="display:flex;gap:8px">
+        <input type="text" id="webhookUrl" placeholder="https://example.com/webhook" style="flex:1;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-family:inherit;font-size:12px;outline:none;">
+        <button onclick="addWebhook()" style="padding:8px 12px;border-radius:8px;border:1px solid var(--accent);background:var(--accent-glow);color:#a29bfe;font-family:inherit;font-size:12px;font-weight:600;cursor:pointer;">Add</button>
+      </div>
+    </div>
     <div class="modal-actions">
       <button class="btn-cancel" onclick="closeProjectModal()">Cancel</button>
       <button class="btn-save" onclick="saveProject()">Save Project</button>
@@ -3817,10 +3825,58 @@ function openProjectModal(project) {
 
   modal.classList.add('open');
   setTimeout(() => document.getElementById('pName').focus(), 100);
+
+  // Load webhooks for this project
+  loadWebhooks(project ? project.id : activeProjectId);
 }
 
 function closeProjectModal() {
   document.getElementById('projectModal').classList.remove('open');
+}
+
+let currentWebhooks = [];
+
+async function loadWebhooks(projectId) {
+  try {
+    const res = await fetch(`/api/webhooks?projectId=${encodeURIComponent(projectId)}`);
+    currentWebhooks = await res.json();
+    renderWebhookList();
+  } catch(e) {}
+}
+
+function renderWebhookList() {
+  const el = document.getElementById('webhookList');
+  if (!el) return;
+  if (!currentWebhooks.length) {
+    el.innerHTML = '<div style="font-size:12px;color:var(--text-dim);font-style:italic">No webhooks configured.</div>';
+    return;
+  }
+  el.innerHTML = currentWebhooks.map(h => `
+    <div style="display:flex;align-items:center;gap:8px;padding:7px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;font-size:12px;">
+      <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${esc(h.url)}">${esc(h.url)}</span>
+      <span style="font-size:10px;color:var(--text-dim)">${(h.events||[]).join(', ') || 'all'}</span>
+      <button onclick="deleteWebhook('${h.id}')" style="border:none;background:transparent;color:var(--text-dim);cursor:pointer;font-size:14px;line-height:1;padding:0 2px;">×</button>
+    </div>
+  `).join('');
+}
+
+async function addWebhook() {
+  const url = document.getElementById('webhookUrl').value.trim();
+  const projectId = document.getElementById('projectEditId').value || activeProjectId;
+  if (!url) return;
+  await fetch('/api/webhooks', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url, projectId, events: [] }),
+  });
+  document.getElementById('webhookUrl').value = '';
+  await loadWebhooks(projectId);
+}
+
+async function deleteWebhook(id) {
+  await fetch(`/api/webhooks/${id}`, { method: 'DELETE' });
+  currentWebhooks = currentWebhooks.filter(h => h.id !== id);
+  renderWebhookList();
 }
 
 async function saveProject() {

@@ -26,6 +26,34 @@ const COL_LABELS = { 'backlog': 'Backlog', 'in-progress': 'In Progress', 'in-rev
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
+// ─── Webhook event emitter ────────────────────────────────────────────────────
+const https = require('https');
+const http = require('http');
+const crypto = require('crypto');
+
+function fireWebhook(projectId, eventType, payload) {
+  const hooks = db.prepare("SELECT * FROM webhooks WHERE projectId = ? AND (events = '[]' OR events LIKE ?)").all(projectId, `%"${eventType}"%`);
+  for (const hook of hooks) {
+    const body = JSON.stringify({ event: eventType, timestamp: new Date().toISOString(), ...payload });
+    const sig = hook.secret ? 'sha256=' + crypto.createHmac('sha256', hook.secret).update(body).digest('hex') : null;
+    try {
+      const url = new URL(hook.url);
+      const lib = url.protocol === 'https:' ? https : http;
+      const options = {
+        hostname: url.hostname,
+        port: url.port || (url.protocol === 'https:' ? 443 : 80),
+        path: url.pathname + url.search,
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body), ...(sig ? { 'X-Webhook-Signature': sig } : {}) },
+      };
+      const req = lib.request(options);
+      req.on('error', () => {}); // fire-and-forget
+      req.write(body);
+      req.end();
+    } catch(e) { /* ignore bad URLs */ }
+  }
+}
+
 // ─── Projects ─────────────────────────────────────────────────────────────────
 
 // GET /api/projects — list all projects
@@ -276,6 +304,34 @@ app.put('/api/tasks/:id', (req, res) => {
         'INSERT INTO card_activity (id, taskId, type, content, author, createdAt) VALUES (?, ?, ?, ?, ?, ?)'
       ).run(recActId, newId, 'created', `Recurring card created (${existing.recurring}) from completed task`, 'System', newCreatedAt);
     }
+
+    // Fire webhooks
+    fireWebhook(updated.projectId || 'default', 'task.updated', { task: { ...updated, tags: JSON.stringify(updated.tags) } });
+
+    // Check if all tasks in a wave are done (for layer.unlocked event)
+    if (req.body.column === 'done' && updated.wave != null) {
+      const waveN = updated.wave;
+      const projectId = updated.projectId || 'default';
+      const waveTasks = db.prepare("SELECT * FROM tasks WHERE projectId = ? AND wave = ?").all(projectId, waveN);
+      const allDone = waveTasks.every(t => t.id === updated.id ? true : t.column === 'done');
+      if (allDone) {
+        fireWebhook(projectId, 'layer.unlocked', { wave: waveN, projectId });
+      }
+    }
+
+    // Check if this task being done unblocks others (task.unblocked event)
+    if (req.body.column === 'done') {
+      const unblocked = db.prepare("SELECT blocked_id FROM task_dependencies WHERE blocker_id = ?").all(existing.id);
+      for (const dep of unblocked) {
+        const blockedTask = db.prepare("SELECT * FROM tasks WHERE id = ?").get(dep.blocked_id);
+        if (blockedTask) {
+          const remainingBlockers = db.prepare("SELECT td.blocker_id FROM task_dependencies td INNER JOIN tasks t ON t.id = td.blocker_id WHERE td.blocked_id = ? AND t.column != 'done'").all(dep.blocked_id);
+          if (remainingBlockers.length === 0) {
+            fireWebhook(blockedTask.projectId || 'default', 'task.unblocked', { taskId: dep.blocked_id, task: blockedTask });
+          }
+        }
+      }
+    }
   }
 
   res.json(updated);
@@ -452,6 +508,34 @@ app.delete('/api/attachments/:id', (req, res) => {
   try { fs.unlinkSync(row.path); } catch (e) { /* ignore if already gone */ }
 
   db.prepare('DELETE FROM attachments WHERE id = ?').run(req.params.id);
+  res.status(204).end();
+});
+
+// ─── Webhooks ─────────────────────────────────────────────────────────────────
+
+app.get('/api/webhooks', (req, res) => {
+  const projectId = req.query.projectId || 'default';
+  const rows = db.prepare('SELECT * FROM webhooks WHERE projectId = ? ORDER BY createdAt ASC').all(projectId);
+  res.json(rows.map(r => ({ ...r, events: JSON.parse(r.events) })));
+});
+
+app.post('/api/webhooks', (req, res) => {
+  const hook = {
+    id: Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
+    projectId: req.body.projectId || 'default',
+    url: req.body.url || '',
+    events: req.body.events || [],
+    secret: req.body.secret || null,
+    createdAt: new Date().toISOString(),
+  };
+  if (!hook.url) return res.status(400).json({ error: 'url required' });
+  db.prepare('INSERT INTO webhooks (id, projectId, url, events, secret, createdAt) VALUES (?, ?, ?, ?, ?, ?)')
+    .run(hook.id, hook.projectId, hook.url, JSON.stringify(hook.events), hook.secret, hook.createdAt);
+  res.status(201).json({ ...hook });
+});
+
+app.delete('/api/webhooks/:id', (req, res) => {
+  db.prepare('DELETE FROM webhooks WHERE id = ?').run(req.params.id);
   res.status(204).end();
 });
 
