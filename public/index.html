@@ -2936,42 +2936,42 @@ kbd {
 <nav id="projectSidebar" class="sidebar-collapsed">
   <div class="sidebar-header">
     <h3>Projects</h3>
-    <button id="sidebarToggle" onclick="toggleSidebar()" title="Collapse sidebar">☰</button>
+    <button id="sidebarToggle" title="Collapse sidebar">☰</button>
   </div>
   <div class="sidebar-projects" id="sidebarProjects"></div>
   <div class="sidebar-footer">
-    <button class="sidebar-new-btn" onclick="openProjectModal()">+ New Project</button>
+    <button class="sidebar-new-btn" id="sidebarNewBtn">+ New Project</button>
   </div>
 </nav>
-<div class="sidebar-backdrop" id="sidebarBackdrop" onclick="closeMobileSidebar()"></div>
-<button class="sidebar-expand-btn" id="sidebarExpandBtn" onclick="toggleSidebar()" title="Open sidebar">☰</button>
+<div class="sidebar-backdrop" id="sidebarBackdrop"></div>
+<button class="sidebar-expand-btn" id="sidebarExpandBtn" title="Open sidebar">☰</button>
 
 <div class="app-content sidebar-collapsed" id="appContent">
 <header>
   <div class="logo">
-    <button id="mobileMenuBtn" onclick="openMobileSidebar()" title="Menu">☰</button>
+    <button id="mobileMenuBtn" title="Menu">☰</button>
     <div class="logo-icon">K</div>
     <h1 id="headerTitle">Kanban Board</h1>
   </div>
   <div class="header-actions">
     <div class="notif-wrapper">
-      <button class="notif-btn" id="notifBtn" onclick="toggleNotifDropdown()" title="Notifications">
+      <button class="notif-btn" id="notifBtn" title="Notifications">
         🔔
         <span class="notif-badge" id="notifBadge">0</span>
       </button>
       <div class="notif-dropdown" id="notifDropdown">
         <div class="notif-header">
           <h3>Activity</h3>
-          <button class="notif-clear-btn" onclick="clearNotifications()">Mark all read</button>
+          <button class="notif-clear-btn" id="notifClearBtn">Mark all read</button>
         </div>
         <div class="notif-list" id="notifList">
           <div class="notif-empty">No activity yet</div>
         </div>
       </div>
     </div>
-    <button class="select-mode-btn" id="selectModeBtn" onclick="toggleSelectMode()" title="Toggle card selection mode">☑ Select</button>
-    <button class="filter-btn" onclick="openStats()">📊 Stats</button>
-    <button class="btn-add" onclick="openModal()">+ New Task</button>
+    <button class="select-mode-btn" id="selectModeBtn" title="Toggle card selection mode">☑ Select</button>
+    <button class="filter-btn" id="statsBtn">📊 Stats</button>
+    <button class="btn-add" id="addTaskBtn">+ New Task</button>
   </div>
 </header>
 
@@ -3029,7 +3029,7 @@ kbd {
       <button class="search-toggle-btn" id="filterOverdue" title="Show only overdue tasks">⚠️ Overdue</button>
     </div>
     <span class="search-results-info" id="searchResultsInfo"></span>
-    <button class="search-reset-btn" id="searchResetBtn" onclick="resetSearch()">Reset filters</button>
+    <button class="search-reset-btn" id="searchResetBtn">Reset filters</button>
   </div>
 </div>
 
@@ -3079,7 +3079,7 @@ kbd {
     <div class="board-error-icon">⚠️</div>
     <div class="board-error-title">Failed to load board</div>
     <div class="board-error-msg" id="boardErrorMsg">Something went wrong while fetching tasks. Check your connection and try again.</div>
-    <button class="board-error-retry" onclick="retryLoad()">↺ Retry</button>
+    <button class="board-error-retry" id="retryBtn">↺ Retry</button>
   </div>
 
   <div class="column" data-col="idea">
@@ -3119,7 +3119,7 @@ kbd {
   </div>
 </div>
 
-<button class="fab" onclick="openModal()" aria-label="Add task">+</button>
+<button class="fab" id="fabBtn" aria-label="Add task">+</button>
 
 <!-- Modal -->
 <div class="modal-overlay" id="modal">
@@ -3128,7 +3128,7 @@ kbd {
     <input type="hidden" id="taskId">
     <div class="field" id="templateSelectField" style="display:none">
       <label>Use Template</label>
-      <select id="fTemplate" onchange="applyTemplate()">
+      <select id="fTemplate">
         <option value="">— no template —</option>
       </select>
     </div>
@@ -3197,7 +3197,7 @@ kbd {
     <div class="field">
       <label>Tags</label>
       <div class="tag-autocomplete" id="tagAutocompleteWrapper">
-        <div class="tag-chip-editor" id="tagChipEditor" onclick="document.getElementById('tagChipInput').focus()">
+        <div class="tag-chip-editor" id="tagChipEditor">
           <!-- chips injected here -->
           <input class="tag-chip-input" id="tagChipInput" type="text" placeholder="Add tag…" autocomplete="off">
         </div>
@@ -3209,8 +3209,8 @@ kbd {
       <label>Checklist</label>
       <div class="checklist-items" id="checklistItems"></div>
       <div class="checklist-add-row">
-        <input type="text" id="checklistInput" placeholder="Add checklist item..." onkeydown="if(event.key==='Enter'){event.preventDefault();addChecklistItem();}">
-        <button class="checklist-add-btn" onclick="addChecklistItem()">Add</button>
+        <input type="text" id="checklistInput" placeholder="Add checklist item...">
+        <button class="checklist-add-btn" id="checklistAddBtn">Add</button>
       </div>
     </div>
     <div class="dep-section" id="depSection" style="display:none">
@@ -3220,7 +3220,7 @@ kbd {
         <select id="depSelect">
           <option value="">— select a blocker card —</option>
         </select>
-        <button class="dep-add-btn" onclick="addBlocker()">Add</button>
+        <button class="dep-add-btn" id="depAddBtn">Add</button>
       </div>
     </div>
     <!-- Attachments (only shown when editing an existing task) -->
@@ -3231,7 +3231,7 @@ kbd {
       </div>
       <div class="attachment-upload-row">
         <input type="file" id="attachmentFile" multiple>
-        <button class="attachment-upload-btn" onclick="uploadAttachments()">Upload</button>
+        <button class="attachment-upload-btn" id="attachUploadBtn">Upload</button>
       </div>
     </div>
     <div class="modal-error-banner" id="modalErrorBanner">
@@ -3239,13 +3239,13 @@ kbd {
       <span id="modalErrorText">Failed to save. Please try again.</span>
     </div>
     <div class="modal-actions">
-      <button class="btn-cancel" onclick="closeModal()">Cancel</button>
-      <button class="btn-save" id="btnSaveTask" onclick="saveTask()">Save Task</button>
+      <button class="btn-cancel" id="modalCancelBtn">Cancel</button>
+      <button class="btn-save" id="btnSaveTask">Save Task</button>
     </div>
 
     <!-- Activity & Comments (only shown when editing) -->
     <div class="activity-section" id="activitySection" style="display:none">
-      <button class="activity-toggle" id="activityToggle" onclick="toggleActivity()">
+      <button class="activity-toggle" id="activityToggle">
         <span>💬</span> Activity & Comments
         <span class="activity-toggle-arrow">▼</span>
       </button>
@@ -3255,19 +3255,19 @@ kbd {
         </div>
         <div class="comment-form">
           <textarea class="comment-input" id="commentInput" placeholder="Add a comment..." rows="1"
-            onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();submitComment();}"></textarea>
+            ></textarea>
           <select class="comment-author-select" id="commentAuthor">
             <option value="Mike">Mike</option>
             <option value="ClawDawg">ClawDawg</option>
           </select>
-          <button class="btn-comment" onclick="submitComment()">Post</button>
+          <button class="btn-comment" id="commentSubmitBtn">Post</button>
         </div>
       </div>
     </div>
 
     <!-- Handoff Log -->
     <div class="activity-section" id="handoffSection" style="display:none">
-      <button class="activity-toggle" id="handoffToggle" onclick="toggleHandoff()">
+      <button class="activity-toggle" id="handoffToggle">
         <span>🤝</span> Handoff Notes
         <span class="activity-toggle-arrow" id="handoffArrow">▼</span>
       </button>
@@ -3280,7 +3280,7 @@ kbd {
 
     <!-- Agent Log Tab -->
     <div class="activity-section" id="agentLogSection" style="display:none">
-      <button class="activity-toggle" id="agentLogToggle" onclick="toggleAgentLog()">
+      <button class="activity-toggle" id="agentLogToggle">
         <span>📟</span> Agent Log
         <span class="activity-toggle-arrow" id="agentLogArrow">▼</span>
       </button>
@@ -3295,12 +3295,12 @@ kbd {
 </div>
 
 <!-- Stats Panel -->
-<div class="stats-overlay" id="statsOverlay" onclick="if(event.target===this)closeStats()">
+<div class="stats-overlay" id="statsOverlay">
   <div class="stats-panel">
     <h2>Board Stats: <span id="statsProjectName" style="font-weight:400;color:var(--text-dim)"></span></h2>
     <div class="stat-highlights" id="statHighlights"></div>
     <div id="statDetails"></div>
-    <button class="stats-close" onclick="closeStats()">Close</button>
+    <button class="stats-close" id="statsCloseBtn">Close</button>
   </div>
 </div>
 
@@ -3311,7 +3311,7 @@ kbd {
 </div>
 
 <!-- Quick Project Switcher -->
-<div id="quickSwitcher" onclick="if(event.target===this)closeQuickSwitcher()">
+<div id="quickSwitcher">
   <div class="qs-panel">
     <input type="text" class="qs-input" id="qsInput" placeholder="Switch project..." autocomplete="off">
     <div class="qs-list" id="qsList"></div>
@@ -3320,7 +3320,7 @@ kbd {
 </div>
 
 <!-- Project Modal -->
-<div id="projectModal" onclick="if(event.target===this)closeProjectModal()">
+<div id="projectModal">
   <div class="project-modal-content">
     <h2 id="projectModalTitle">New Project</h2>
     <input type="hidden" id="projectEditId">
@@ -3372,7 +3372,7 @@ kbd {
       <div id="projectTemplateEditor" style="display:flex;flex-direction:column;gap:8px;padding:10px;border:1px solid var(--border);border-radius:10px;background:var(--surface2);">
         <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
           <strong id="projectTemplateEditorTitle" style="font-size:12px;">New template</strong>
-          <button type="button" onclick="resetProjectTemplateForm()" style="padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--text-dim);font-family:inherit;font-size:11px;cursor:pointer;">Clear</button>
+          <button type="button" id="templateClearBtn" style="padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--text-dim);font-family:inherit;font-size:11px;cursor:pointer;">Clear</button>
         </div>
         <input type="hidden" id="projectTemplateEditId">
         <input type="text" id="projectTemplateName" placeholder="Template name" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-family:inherit;font-size:12px;outline:none;">
@@ -3388,7 +3388,7 @@ kbd {
           </select>
         </div>
         <div style="display:flex;justify-content:flex-end;gap:8px;">
-          <button type="button" onclick="saveProjectTemplate()" style="padding:8px 12px;border-radius:8px;border:1px solid var(--accent);background:var(--accent-glow);color:#a29bfe;font-family:inherit;font-size:12px;font-weight:600;cursor:pointer;">Save Template</button>
+          <button type="button" id="templateSaveBtn" style="padding:8px 12px;border-radius:8px;border:1px solid var(--accent);background:var(--accent-glow);color:#a29bfe;font-family:inherit;font-size:12px;font-weight:600;cursor:pointer;">Save Template</button>
         </div>
       </div>
     </div>
@@ -3397,12 +3397,12 @@ kbd {
       <div id="webhookList" style="margin-bottom:8px;display:flex;flex-direction:column;gap:6px"></div>
       <div style="display:flex;gap:8px">
         <input type="text" id="webhookUrl" placeholder="https://example.com/webhook" style="flex:1;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-family:inherit;font-size:12px;outline:none;">
-        <button onclick="addWebhook()" style="padding:8px 12px;border-radius:8px;border:1px solid var(--accent);background:var(--accent-glow);color:#a29bfe;font-family:inherit;font-size:12px;font-weight:600;cursor:pointer;">Add</button>
+        <button id="webhookAddBtn" style="padding:8px 12px;border-radius:8px;border:1px solid var(--accent);background:var(--accent-glow);color:#a29bfe;font-family:inherit;font-size:12px;font-weight:600;cursor:pointer;">Add</button>
       </div>
     </div>
     <div class="modal-actions">
-      <button class="btn-cancel" onclick="closeProjectModal()">Cancel</button>
-      <button class="btn-save" onclick="saveProject()">Save Project</button>
+      <button class="btn-cancel" id="projModalCancelBtn">Cancel</button>
+      <button class="btn-save" id="projModalSaveBtn">Save Project</button>
     </div>
   </div>
 </div>
@@ -3849,7 +3849,7 @@ function cardHTML(t, q) {
   const tags = (t.tags || []).map(tag => `<span class="tag">${q ? highlightText(tag, q) : esc(tag)}</span>`).join('');
   const moveBtns = COL_ORDER
     .filter((c) => c !== t.column)
-    .map(c => `<button class="card-move-btn" onclick="moveTask('${t.id}','${c}')">${COL_LABELS[c]}</button>`)
+    .map(c => `<button class="card-move-btn" data-action="moveTask" data-task-id="${t.id}" data-col="${c}">${COL_LABELS[c]}</button>`)
     .join('');
 
   // Determine if overdue for card border highlight
@@ -3862,7 +3862,7 @@ function cardHTML(t, q) {
   const blocked = isBlocked(t.id);
   const activeBlockerIds = getBlockerIds(t.id).filter(bid => { const b = tasks.find(x => x.id === bid); return b && b.column !== 'done'; });
   const blockedBanner = blocked
-    ? `<div class="card-blocked-banner" onclick="editTask('${t.id}')" title="Click to manage blockers">
+    ? `<div class="card-blocked-banner" data-action="editTask" data-task-id="${t.id}" title="Click to manage blockers">
         <span class="lock-icon">🔒</span>
         Blocked by ${activeBlockerIds.length} card${activeBlockerIds.length !== 1 ? 's' : ''}
        </div>`
@@ -3898,13 +3898,13 @@ function cardHTML(t, q) {
   }
 
   const isSelected = selectedTaskIds.has(t.id);
-  return `<div class="card${isOverdue ? ' overdue-card' : ''}${blocked ? ' is-blocked' : ''}${t.column === 'idea' ? ' idea-card' : ''}${isSelected ? ' selected' : ''}" draggable="true" data-id="${t.id}" tabindex="0" onclick="onCardBulkClick(event, '${t.id}')">
+  return `<div class="card${isOverdue ? ' overdue-card' : ''}${blocked ? ' is-blocked' : ''}${t.column === 'idea' ? ' idea-card' : ''}${isSelected ? ' selected' : ''}" draggable="true" data-id="${t.id}" tabindex="0" data-action="cardBulkClick" data-task-id="${t.id}">
     <div class="card-priority ${t.priority}"></div>
-    <div class="card-checkbox-wrap"><input type="checkbox" class="card-checkbox" ${isSelected ? 'checked' : ''} onclick="onCardBulkClick(event, '${t.id}')" aria-label="Select ${esc(t.title)}"></div>
+    <div class="card-checkbox-wrap"><input type="checkbox" class="card-checkbox" ${isSelected ? 'checked' : ''} data-action="cardBulkClick" data-task-id="${t.id}" aria-label="Select ${esc(t.title)}"></div>
     <div class="card-actions">
-      ${(t.column === 'backlog' && !t.lockedBy && !isBlocked(t.id)) ? `<button class="card-action-btn" onclick="spawnAgent('${t.id}', event)" title="Run agent" aria-label="Run agent for ${esc(t.title)}">▶</button>` : ''}
-      <button class="card-action-btn" onclick="editTask('${t.id}')" title="Edit card" aria-label="Edit ${esc(t.title)}">&#9998;</button>
-      <button class="card-action-btn delete" onclick="deleteTask('${t.id}', event)" title="Delete card" aria-label="Delete ${esc(t.title)}">&times;</button>
+      ${(t.column === 'backlog' && !t.lockedBy && !isBlocked(t.id)) ? `<button class="card-action-btn" data-action="spawnAgent" data-task-id="${t.id}" title="Run agent" aria-label="Run agent for ${esc(t.title)}">▶</button>` : ''}
+      <button class="card-action-btn" data-action="editTask" data-task-id="${t.id}" title="Edit card" aria-label="Edit ${esc(t.title)}">&#9998;</button>
+      <button class="card-action-btn delete" data-action="deleteTask" data-task-id="${t.id}" title="Delete card" aria-label="Delete ${esc(t.title)}">&times;</button>
     </div>
     <div class="card-title">${q ? highlightText(t.title, q) : esc(t.title)}</div>
     ${t.priority ? `<div class="priority-badge ${t.priority}">${{ urgent: '🔴 Urgent', high: '🟠 High', medium: '🟡 Medium', low: '🟢 Low' }[t.priority] || esc(t.priority)}</div>` : ''}
@@ -4050,7 +4050,7 @@ function showToast(message, type = 'error', durationMs = 5000) {
   const toast = document.createElement('div');
   toast.className = `toast toast-${type}`;
   const icons = { error: '❌', success: '✅', warn: '⚠️', info: 'ℹ️' };
-  toast.innerHTML = `<span>${icons[type] || '❌'}</span><span style="flex:1">${esc(message)}</span><button class="toast-dismiss" onclick="this.parentElement.remove()">×</button>`;
+  toast.innerHTML = `<span>${icons[type] || '❌'}</span><span style="flex:1">${esc(message)}</span><button class="toast-dismiss" data-action="dismissToast">×</button>`;
   container.appendChild(toast);
   const timer = setTimeout(() => {
     if (toast.isConnected) {
@@ -4426,7 +4426,7 @@ function renderTagChips() {
   currentTags.forEach((tag, i) => {
     const chip = document.createElement('span');
     chip.className = 'tag-chip';
-    chip.innerHTML = `${esc(tag)}<button class="tag-chip-remove" type="button" title="Remove" onclick="removeTag(${i})">×</button>`;
+    chip.innerHTML = `${esc(tag)}<button class="tag-chip-remove" type="button" title="Remove" data-action="removeTag" data-index="${i}">×</button>`;
     editor.insertBefore(chip, input);
   });
   // Update placeholder
@@ -4448,9 +4448,9 @@ function renderChecklist() {
   }
   container.innerHTML = currentChecklist.map((item, idx) => `
     <div class="checklist-item">
-      <input type="checkbox" ${item.done ? 'checked' : ''} onchange="toggleChecklistItem(${idx})">
+      <input type="checkbox" ${item.done ? 'checked' : ''} data-action="toggleChecklist" data-index="${idx}">
       <span class="cl-text ${item.done ? 'done' : ''}">${esc(item.text)}</span>
-      <button class="cl-remove" onclick="removeChecklistItem(${idx})" title="Remove">×</button>
+      <button class="cl-remove" data-action="removeChecklist" data-index="${idx}" title="Remove">×</button>
     </div>
   `).join('');
 }
@@ -4692,7 +4692,7 @@ function renderBlockerList(taskId) {
     return `<div class="dep-item">
       <span class="dep-title" title="${esc(b.title)}">${isDone ? '✅ ' : '🔒 '}${esc(b.title)}</span>
       <span class="dep-col-badge">${colLabel}</span>
-      <button class="dep-remove" onclick="removeBlocker('${taskId}','${bid}')" title="Remove blocker">&times;</button>
+      <button class="dep-remove" data-action="removeBlocker" data-task-id="${taskId}" data-blocker-id="${bid}" title="Remove blocker">&times;</button>
     </div>`;
   }).filter(Boolean).join('');
 }
@@ -4760,7 +4760,7 @@ function renderActivity() {
     const icon = a.type === 'move' ? '↔' : a.type === 'created' ? '✦' : '💬';
     const time = formatRelTime(a.createdAt);
     const deleteBtn = a.type === 'comment'
-      ? `<button class="activity-delete" onclick="deleteComment('${a.id}', event)" title="Delete" aria-label="Delete comment">×</button>`
+      ? `<button class="activity-delete" data-action="deleteComment" data-comment-id="${a.id}" title="Delete" aria-label="Delete comment">×</button>`
       : '';
     return `<div class="activity-item" data-aid="${a.id}">
       <div class="activity-icon ${esc(a.type)}">${icon}</div>
@@ -5126,7 +5126,7 @@ function renderAttachments(taskId, attachments) {
           <a class="attachment-name" href="/uploads/${a.filename}" target="_blank" download="${a.original_name}" title="${a.original_name}">${a.original_name}</a>
           <span class="attachment-size">${sizeStr} · ${new Date(a.uploadedAt).toLocaleDateString()}</span>
         </div>
-        <button class="attachment-remove" onclick="deleteAttachment('${a.id}', '${taskId}', event)" title="Remove" aria-label="Remove attachment">✕</button>
+        <button class="attachment-remove" data-action="deleteAttachment" data-attachment-id="${a.id}" data-task-id="${taskId}" title="Remove" aria-label="Remove attachment">✕</button>
       </div>`;
   }).join('');
 }
@@ -5299,7 +5299,7 @@ function renderNotifications() {
     const toLabel = COL_LABELS[n.to_col] || n.to_col;
     const fromEmoji = COL_EMOJI[n.from_col] || '';
     const toEmoji = COL_EMOJI[n.to_col] || '';
-    return `<div class="notif-item ${n.is_read ? 'read' : 'unread'}" data-id="${n.id}" onclick="markNotificationRead(${n.id})">
+    return `<div class="notif-item ${n.is_read ? 'read' : 'unread'}" data-id="${n.id}" data-action="markNotifRead" data-notif-id="${n.id}">
       <div class="notif-dot"></div>
       <div class="notif-content">
         <div class="notif-text">
@@ -5308,7 +5308,7 @@ function renderNotifications() {
         </div>
         <div class="notif-time">${timeAgo} · ${n.changed_by}</div>
       </div>
-      <button class="notif-dismiss" onclick="dismissNotification(${n.id}, event)" title="Dismiss">×</button>
+      <button class="notif-dismiss" data-action="dismissNotif" data-notif-id="${n.id}" title="Dismiss">×</button>
     </div>`;
   }).join('');
 }
@@ -5749,15 +5749,15 @@ function renderSidebar() {
     const count = getProjectTaskCount(p.id);
     const isDefault = p.id === 'default';
     return `<div class="sidebar-project${isActive ? ' active' : ''}" data-project-id="${p.id}"
-              onclick="switchProject('${p.id}')"
-              oncontextmenu="event.preventDefault();toggleProjectActions('${p.id}')">
+              data-action="switchProject" data-project-id="${p.id}"
+              data-contextaction="toggleProjectActions">
       <span class="proj-emoji">${p.emoji || '📋'}</span>
       <span class="proj-name">${esc(p.name)}</span>
       ${isDefault ? '<span class="proj-pin">📌</span>' : ''}
       <span class="proj-count">${count}</span>
       <div class="sidebar-project-actions">
-        <button class="proj-action-btn" onclick="event.stopPropagation();editProject('${p.id}')" title="Edit">✎</button>
-        ${!isDefault ? `<button class="proj-action-btn delete" onclick="event.stopPropagation();deleteProject('${p.id}')" title="Delete">×</button>` : ''}
+        <button class="proj-action-btn" data-action="editProject" data-project-id="${p.id}" title="Edit">✎</button>
+        ${!isDefault ? `<button class="proj-action-btn delete" data-action="deleteProject" data-project-id="${p.id}" title="Delete">×</button>` : ''}
       </div>
     </div>`;
   }).join('');
@@ -5935,8 +5935,8 @@ function renderProjectTemplateList() {
           <div style="font-size:11px;color:var(--text-dim);margin-top:3px;">${esc((t.defaultAssignee || 'Mike'))} · ${esc((t.defaultPriority || 'medium'))}</div>
         </div>
         <div style="display:flex;gap:6px;flex-shrink:0;">
-          <button type="button" onclick="editProjectTemplate('${t.id}')" style="padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--text);font-family:inherit;font-size:11px;cursor:pointer;">Edit</button>
-          <button type="button" onclick="deleteProjectTemplate('${t.id}')" style="padding:6px 10px;border-radius:8px;border:1px solid rgba(255,107,107,.35);background:rgba(255,107,107,.08);color:#ff8b8b;font-family:inherit;font-size:11px;cursor:pointer;">Delete</button>
+          <button type="button" data-action="editProjectTemplate" data-template-id="${t.id}" style="padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--text);font-family:inherit;font-size:11px;cursor:pointer;">Edit</button>
+          <button type="button" data-action="deleteProjectTemplate" data-template-id="${t.id}" style="padding:6px 10px;border-radius:8px;border:1px solid rgba(255,107,107,.35);background:rgba(255,107,107,.08);color:#ff8b8b;font-family:inherit;font-size:11px;cursor:pointer;">Delete</button>
         </div>
       </div>
       ${t.defaultDescription ? `<div style="font-size:12px;color:var(--text-dim);white-space:pre-wrap;word-break:break-word;">${esc(t.defaultDescription)}</div>` : ''}
@@ -6065,7 +6065,7 @@ function renderWebhookList() {
     <div style="display:flex;align-items:center;gap:8px;padding:7px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;font-size:12px;">
       <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${esc(h.url)}">${esc(h.url)}</span>
       <span style="font-size:10px;color:var(--text-dim)">${(h.events||[]).join(', ') || 'all'}</span>
-      <button onclick="deleteWebhook('${h.id}')" style="border:none;background:transparent;color:var(--text-dim);cursor:pointer;font-size:14px;line-height:1;padding:0 2px;">×</button>
+      <button data-action="deleteWebhook" data-webhook-id="${h.id}" style="border:none;background:transparent;color:var(--text-dim);cursor:pointer;font-size:14px;line-height:1;padding:0 2px;">×</button>
     </div>
   `).join('');
 }
@@ -6191,7 +6191,7 @@ function renderQuickSwitcher(query) {
   }
   list.innerHTML = qsFilteredProjects.map((p, i) => {
     const isActive = p.id === activeProjectId;
-    return `<div class="qs-item${i === qsFocusIndex ? ' focused' : ''}" data-idx="${i}" onclick="selectQuickSwitcher(${i})">
+    return `<div class="qs-item${i === qsFocusIndex ? ' focused' : ''}" data-idx="${i}" data-action="selectQuickSwitcher" data-qs-idx="${i}">
       <span class="qs-emoji">${p.emoji || '📋'}</span>
       <span class="qs-name">${esc(p.name)}</span>
       ${isActive ? '<span class="qs-active-badge">current</span>' : ''}
@@ -6303,6 +6303,176 @@ loadProjects();
 loadTasks();
 loadNotifications();
 connectSSE();
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// EVENT LISTENERS — All handlers registered via addEventListener (CSP-safe)
+// ═══════════════════════════════════════════════════════════════════════════════
+document.addEventListener('DOMContentLoaded', function() {
+  // ─── Static element listeners ─────────────────────────────────────────────
+  document.getElementById('sidebarToggle').addEventListener('click', toggleSidebar);
+  document.getElementById('sidebarNewBtn').addEventListener('click', function() { openProjectModal(); });
+  document.getElementById('sidebarBackdrop').addEventListener('click', closeMobileSidebar);
+  document.getElementById('sidebarExpandBtn').addEventListener('click', toggleSidebar);
+  document.getElementById('mobileMenuBtn').addEventListener('click', openMobileSidebar);
+  document.getElementById('notifBtn').addEventListener('click', toggleNotifDropdown);
+  document.getElementById('notifClearBtn').addEventListener('click', clearNotifications);
+  document.getElementById('selectModeBtn').addEventListener('click', toggleSelectMode);
+  document.getElementById('statsBtn').addEventListener('click', openStats);
+  document.getElementById('addTaskBtn').addEventListener('click', function() { openModal(); });
+  document.getElementById('searchResetBtn').addEventListener('click', resetSearch);
+  document.getElementById('retryBtn').addEventListener('click', retryLoad);
+  document.getElementById('fabBtn').addEventListener('click', function() { openModal(); });
+  document.getElementById('fTemplate').addEventListener('change', applyTemplate);
+  document.getElementById('tagChipEditor').addEventListener('click', function() {
+    document.getElementById('tagChipInput').focus();
+  });
+  document.getElementById('checklistInput').addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') { e.preventDefault(); addChecklistItem(); }
+  });
+  document.getElementById('checklistAddBtn').addEventListener('click', addChecklistItem);
+  document.getElementById('depAddBtn').addEventListener('click', addBlocker);
+  document.getElementById('attachUploadBtn').addEventListener('click', uploadAttachments);
+  document.getElementById('modalCancelBtn').addEventListener('click', closeModal);
+  document.getElementById('btnSaveTask').addEventListener('click', saveTask);
+  document.getElementById('activityToggle').addEventListener('click', toggleActivity);
+  document.getElementById('commentInput').addEventListener('keydown', function(e) {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submitComment(); }
+  });
+  document.getElementById('commentSubmitBtn').addEventListener('click', submitComment);
+  document.getElementById('handoffToggle').addEventListener('click', toggleHandoff);
+  document.getElementById('agentLogToggle').addEventListener('click', toggleAgentLog);
+  document.getElementById('statsOverlay').addEventListener('click', function(e) {
+    if (e.target === this) closeStats();
+  });
+  document.getElementById('statsCloseBtn').addEventListener('click', closeStats);
+  document.getElementById('quickSwitcher').addEventListener('click', function(e) {
+    if (e.target === this) closeQuickSwitcher();
+  });
+  document.getElementById('projectModal').addEventListener('click', function(e) {
+    if (e.target === this) closeProjectModal();
+  });
+  document.getElementById('templateClearBtn').addEventListener('click', resetProjectTemplateForm);
+  document.getElementById('templateSaveBtn').addEventListener('click', saveProjectTemplate);
+  document.getElementById('webhookAddBtn').addEventListener('click', addWebhook);
+  document.getElementById('projModalCancelBtn').addEventListener('click', closeProjectModal);
+  document.getElementById('projModalSaveBtn').addEventListener('click', saveProject);
+  document.getElementById('bulkMoveSelect').addEventListener('change', function() {
+    bulkMoveSelected(this.value);
+  });
+  document.getElementById('bulkDeleteBtn').addEventListener('click', bulkDeleteSelected);
+  document.getElementById('bulkDeselectBtn').addEventListener('click', clearBulkSelection);
+  document.getElementById('confirmModal').addEventListener('click', function(e) {
+    if (e.target === this && _confirmModalReject) _confirmModalReject();
+  });
+  document.getElementById('confirmCancelBtn').addEventListener('click', function() {
+    if (_confirmModalReject) _confirmModalReject();
+  });
+  document.getElementById('confirmModalOk').addEventListener('click', function() {
+    if (_confirmModalResolve) _confirmModalResolve();
+  });
+  document.getElementById('kbdOverlay').addEventListener('click', function(e) {
+    if (e.target === this) closeKbdOverlay();
+  });
+
+  // ─── Delegated event handlers for dynamic content ─────────────────────────
+  // Single click delegation on document body
+  document.body.addEventListener('click', function(e) {
+    const el = e.target.closest('[data-action]');
+    if (!el) return;
+    const action = el.dataset.action;
+    const taskId = el.dataset.taskId;
+
+    switch (action) {
+      case 'moveTask':
+        moveTask(taskId, el.dataset.col);
+        break;
+      case 'editTask':
+        editTask(taskId);
+        break;
+      case 'deleteTask':
+        e.stopPropagation();
+        deleteTask(taskId, e);
+        break;
+      case 'spawnAgent':
+        e.stopPropagation();
+        spawnAgent(taskId, e);
+        break;
+      case 'cardBulkClick':
+        onCardBulkClick(e, taskId);
+        break;
+      case 'dismissToast':
+        el.closest('.toast').remove();
+        break;
+      case 'removeTag':
+        removeTag(parseInt(el.dataset.index, 10));
+        break;
+      case 'toggleChecklist':
+        toggleChecklistItem(parseInt(el.dataset.index, 10));
+        break;
+      case 'removeChecklist':
+        removeChecklistItem(parseInt(el.dataset.index, 10));
+        break;
+      case 'removeBlocker':
+        removeBlocker(el.dataset.taskId, el.dataset.blockerId);
+        break;
+      case 'deleteComment':
+        deleteComment(el.dataset.commentId, e);
+        break;
+      case 'markNotifRead':
+        markNotificationRead(parseInt(el.dataset.notifId, 10));
+        break;
+      case 'dismissNotif':
+        e.stopPropagation();
+        dismissNotification(parseInt(el.dataset.notifId, 10), e);
+        break;
+      case 'switchProject':
+        switchProject(el.dataset.projectId);
+        break;
+      case 'editProject':
+        e.stopPropagation();
+        editProject(el.dataset.projectId);
+        break;
+      case 'deleteProject':
+        e.stopPropagation();
+        deleteProject(el.dataset.projectId);
+        break;
+      case 'deleteAttachment':
+        deleteAttachment(el.dataset.attachmentId, el.dataset.taskId, e);
+        break;
+      case 'editProjectTemplate':
+        editProjectTemplate(el.dataset.templateId);
+        break;
+      case 'deleteProjectTemplate':
+        deleteProjectTemplate(el.dataset.templateId);
+        break;
+      case 'deleteWebhook':
+        deleteWebhook(el.dataset.webhookId);
+        break;
+      case 'selectQuickSwitcher':
+        selectQuickSwitcher(parseInt(el.dataset.qsIdx, 10));
+        break;
+    }
+  });
+
+  // Delegated change handler for dynamic checkboxes
+  document.body.addEventListener('change', function(e) {
+    const el = e.target.closest('[data-action]');
+    if (!el) return;
+    if (el.dataset.action === 'toggleChecklist') {
+      toggleChecklistItem(parseInt(el.dataset.index, 10));
+    }
+  });
+
+  // Context menu delegation for sidebar projects
+  document.getElementById('sidebarProjects').addEventListener('contextmenu', function(e) {
+    const el = e.target.closest('[data-contextaction="toggleProjectActions"]');
+    if (el) {
+      e.preventDefault();
+      toggleProjectActions(el.dataset.projectId);
+    }
+  });
+});
+
 </script>
 
 <!-- Confirmation Modal (for destructive project deletes) -->
@@ -6311,7 +6481,7 @@ connectSSE();
   <span class="bulk-count" id="bulkCount">0 selected</span>
   <div class="bulk-divider"></div>
   <span class="bulk-action-label">Move to</span>
-  <select class="bulk-move-select" id="bulkMoveSelect" onchange="bulkMoveSelected(this.value)">
+  <select class="bulk-move-select" id="bulkMoveSelect">
     <option value="">— column —</option>
     <option value="idea">Idea</option>
     <option value="backlog">Backlog</option>
@@ -6320,23 +6490,23 @@ connectSSE();
     <option value="done">Done</option>
   </select>
   <div class="bulk-divider"></div>
-  <button class="bulk-btn danger" onclick="bulkDeleteSelected()">🗑 Delete</button>
-  <button class="bulk-btn deselect" onclick="clearBulkSelection()">✕ Deselect all</button>
+  <button class="bulk-btn danger" id="bulkDeleteBtn">🗑 Delete</button>
+  <button class="bulk-btn deselect" id="bulkDeselectBtn">✕ Deselect all</button>
 </div>
 
-<div id="confirmModal" onclick="if(event.target===this)_confirmModalReject()">
+<div id="confirmModal">
   <div class="confirm-modal-box" role="dialog" aria-modal="true" aria-labelledby="confirmModalTitle">
     <h3 id="confirmModalTitle">Are you sure?</h3>
     <p id="confirmModalMsg"></p>
     <div class="confirm-modal-actions">
-      <button class="confirm-modal-cancel" onclick="_confirmModalReject()">Cancel</button>
-      <button class="confirm-modal-confirm" id="confirmModalOk" onclick="_confirmModalResolve()">Delete</button>
+      <button class="confirm-modal-cancel" id="confirmCancelBtn">Cancel</button>
+      <button class="confirm-modal-confirm" id="confirmModalOk">Delete</button>
     </div>
   </div>
 </div>
 
 <!-- Keyboard Shortcuts Overlay -->
-<div id="kbdOverlay" onclick="if(event.target===this)closeKbdOverlay()" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">
+<div id="kbdOverlay" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">
   <div class="kbd-box">
     <h2>⌨️ <span>Keyboard Shortcuts</span></h2>
     <table class="kbd-table">

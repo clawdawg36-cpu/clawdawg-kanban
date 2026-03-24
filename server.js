@@ -168,8 +168,8 @@ app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
-      scriptSrc: ["'self'", "'unsafe-inline'"],       // allow inline scripts for the Kanban UI
-      scriptSrcAttr: ["'unsafe-inline'"],              // allow inline onclick/onchange handlers — DO NOT REMOVE
+      scriptSrc: ["'self'", "'unsafe-inline'"],       // allow inline <script> blocks for the Kanban UI
+      scriptSrcAttr: ["'none'"],                       // block inline handlers — all migrated to addEventListener
       styleSrc:  ["'self'", "'unsafe-inline'"],       // allow inline styles
       imgSrc:    ["'self'", "data:", "blob:"],
       connectSrc: ["'self'"],
