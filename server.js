@@ -2,6 +2,8 @@ const express = require('express');
 const path = require('path');
 const fs = require('fs');
 const multer = require('multer');
+const helmet = require('helmet');
+const cors = require('cors');
 const db = require('./db');
 
 // ─── Multer config for file uploads ──────────────────────────────────────────
@@ -50,6 +52,26 @@ const app = express();
 const PORT = 3456;
 
 const COL_LABELS = { 'backlog': 'Backlog', 'in-progress': 'In Progress', 'in-review': 'In Review', 'done': 'Done' };
+
+// ─── Security headers ─────────────────────────────────────────────────────────
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'"],   // allow inline scripts for the Kanban UI
+      styleSrc:  ["'self'", "'unsafe-inline'"],   // allow inline styles
+      imgSrc:    ["'self'", "data:", "blob:"],
+      connectSrc: ["'self'"],
+    },
+  },
+}));
+
+// Restrict cross-origin requests to localhost origins only
+app.use(cors({
+  origin: [/^http:\/\/localhost(:\d+)?$/, /^http:\/\/127\.0\.0\.1(:\d+)?$/],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+}));
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
