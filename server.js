@@ -393,6 +393,80 @@ app.get('/api/tasks/:id', (req, res) => {
   });
 });
 
+// POST /api/tasks/:id/spawn — spawn an agent for this card
+app.post('/api/tasks/:id/spawn', async (req, res) => {
+  const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id);
+  if (!task) return res.status(404).json({ error: 'Not found' });
+
+  // Check if already locked
+  const now = new Date();
+  if (task.lockedBy && task.lockExpiresAt && new Date(task.lockExpiresAt) > now) {
+    return res.status(409).json({ error: 'Task already claimed', lockedBy: task.lockedBy });
+  }
+
+  // Read project agentConfig for model/timeout overrides
+  const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(task.projectId || 'default');
+  const agentConfig = project && project.agentConfig ? JSON.parse(project.agentConfig) : {};
+
+  // Read auth token
+  let authToken = process.env.OPENCLAW_TOKEN;
+  if (!authToken) {
+    try {
+      const configPath = require('path').join(require('os').homedir(), '.openclaw', 'openclaw.json');
+      const config = JSON.parse(require('fs').readFileSync(configPath, 'utf8'));
+      authToken = config?.auth?.token || config?.gateway?.auth?.token ||
+        (config?.auth?.profiles && Object.values(config.auth.profiles)[0]?.token);
+    } catch(e) { /* no token found */ }
+  }
+
+  // Build spawn payload
+  const taskDetails = [
+    `# Task: ${task.title}`,
+    task.description ? `\n## Description\n${task.description}` : '',
+    `\n## Card ID\n${task.id}`,
+    `\n## Project\n${task.projectId || 'default'}`,
+    `\n## Priority\n${task.priority}`,
+    task.tags ? `\n## Tags\n${JSON.parse(task.tags || '[]').join(', ')}` : '',
+  ].join('');
+
+  const spawnPayload = {
+    task: `Read /Users/mike/.openclaw/workspace/SUBAGENTS.md first.\n\n${taskDetails}`,
+    mode: 'run',
+    ...(agentConfig.model ? { model: agentConfig.model } : {}),
+    ...(agentConfig.timeoutSeconds ? { runTimeoutSeconds: agentConfig.timeoutSeconds } : {}),
+  };
+
+  try {
+    // Call gateway spawn endpoint
+    const gatewayRes = await fetch('http://localhost:18789/api/sessions/spawn', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(authToken ? { 'Authorization': `Bearer ${authToken}` } : {}),
+      },
+      body: JSON.stringify(spawnPayload),
+    });
+
+    if (!gatewayRes.ok) {
+      const errText = await gatewayRes.text();
+      return res.status(502).json({ error: 'Gateway spawn failed', details: errText });
+    }
+
+    const spawnResult = await gatewayRes.json();
+    const sessionId = spawnResult.sessionKey || spawnResult.sessionId || spawnResult.id || 'unknown';
+
+    // Lock the card and store agent session ID
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+    const nowIso = now.toISOString();
+    db.prepare('UPDATE tasks SET lockedBy = ?, lockedAt = ?, lockExpiresAt = ?, agentSessionId = ?, agentStartedAt = ?, "column" = ? WHERE id = ?')
+      .run(sessionId, nowIso, expiresAt, sessionId, nowIso, 'in-progress', task.id);
+
+    res.json({ sessionId, taskId: task.id, status: 'spawned' });
+  } catch(e) {
+    res.status(502).json({ error: 'Failed to reach gateway', details: e.message });
+  }
+});
+
 // POST /api/tasks/:id/handoff — append handoff note
 app.post('/api/tasks/:id/handoff', (req, res) => {
   const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id);

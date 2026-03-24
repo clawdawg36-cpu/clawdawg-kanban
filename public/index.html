@@ -2851,6 +2851,7 @@ function cardHTML(t, q) {
   return `<div class="card${isOverdue ? ' overdue-card' : ''}${blocked ? ' is-blocked' : ''}${t.column === 'idea' ? ' idea-card' : ''}" draggable="true" data-id="${t.id}">
     <div class="card-priority ${t.priority}"></div>
     <div class="card-actions">
+      ${(t.column === 'backlog' && !t.lockedBy && !isBlocked(t.id)) ? `<button class="card-action-btn" onclick="spawnAgent('${t.id}', event)" title="▶ Run agent" style="background:rgba(0,184,148,0.15);color:var(--green);">▶</button>` : ''}
       <button class="card-action-btn" onclick="editTask('${t.id}')" title="Edit">&#9998;</button>
       <button class="card-action-btn delete" onclick="deleteTask('${t.id}')" title="Delete">&times;</button>
     </div>
@@ -3349,6 +3350,34 @@ async function deleteTask(id) {
   await fetch(`/api/tasks/${id}`, { method: 'DELETE' });
   tasks = tasks.filter(t => t.id !== id);
   render();
+}
+
+async function spawnAgent(taskId, e) {
+  e.stopPropagation();
+  const task = tasks.find(t => t.id === taskId);
+  if (!task) return;
+  if (!confirm(`Spawn agent for: "${task.title}"?\n\nThis will claim the card and move it to In Progress.`)) return;
+
+  const btn = e.target;
+  btn.textContent = '⏳';
+  btn.disabled = true;
+
+  try {
+    const res = await fetch(`/api/tasks/${taskId}/spawn`, { method: 'POST' });
+    const result = await res.json();
+    if (!res.ok) {
+      alert('Failed to spawn agent: ' + (result.error || res.statusText));
+      btn.textContent = '▶';
+      btn.disabled = false;
+      return;
+    }
+    // Reload tasks to reflect new state
+    await loadTasks();
+  } catch(err) {
+    alert('Error: ' + err.message);
+    btn.textContent = '▶';
+    btn.disabled = false;
+  }
 }
 
 async function saveTask() {
