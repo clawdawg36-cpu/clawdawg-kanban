@@ -206,4 +206,17 @@ db.exec(`
   )
 `);
 
+// Agent logs table
+db.exec(`
+  CREATE TABLE IF NOT EXISTS agent_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    taskId TEXT NOT NULL,
+    agentSessionId TEXT DEFAULT NULL,
+    level TEXT DEFAULT 'info',
+    message TEXT NOT NULL,
+    timestamp TEXT NOT NULL,
+    FOREIGN KEY (taskId) REFERENCES tasks(id) ON DELETE CASCADE
+  )
+`);
+
 module.exports = db;

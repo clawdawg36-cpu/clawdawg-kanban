@@ -2504,6 +2504,20 @@ input[type="date"] {
         </div>
       </div>
     </div>
+
+    <!-- Agent Log Tab -->
+    <div class="activity-section" id="agentLogSection" style="display:none">
+      <button class="activity-toggle" id="agentLogToggle" onclick="toggleAgentLog()">
+        <span>📟</span> Agent Log
+        <span class="activity-toggle-arrow" id="agentLogArrow">▼</span>
+      </button>
+      <div class="activity-body" id="agentLogBody">
+        <div class="activity-list" id="agentLogList" style="max-height:240px">
+          <div class="activity-empty">No log entries yet.</div>
+        </div>
+        <div style="font-size:11px;color:var(--text-dim);margin-top:6px;text-align:center" id="agentLogRefreshNote"></div>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -3159,6 +3173,27 @@ function openModal(task) {
     handoffSection.style.display = 'none';
   }
 
+  // Agent log section
+  const agentLogSection = document.getElementById('agentLogSection');
+  if (task) {
+    agentLogSection.style.display = '';
+    agentLogTaskId = task.id;
+    agentLogOpen = false;
+    document.getElementById('agentLogToggle').classList.remove('expanded');
+    document.getElementById('agentLogBody').classList.remove('open');
+    // Start auto-refresh if card is in-progress
+    if (task.column === 'in-progress') {
+      startAgentLogRefresh(task.id);
+    } else {
+      stopAgentLogRefresh();
+      const note = document.getElementById('agentLogRefreshNote');
+      if (note) note.textContent = '';
+    }
+  } else {
+    agentLogSection.style.display = 'none';
+    stopAgentLogRefresh();
+  }
+
   setTimeout(() => document.getElementById('fTitle').focus(), 100);
 }
 
@@ -3274,6 +3309,72 @@ function toggleActivity() {
 let handoffOpen = false;
 let currentHandoffLog = [];
 
+let agentLogOpen = false;
+let agentLogTaskId = null;
+let agentLogRefreshInterval = null;
+
+function toggleAgentLog() {
+  agentLogOpen = !agentLogOpen;
+  document.getElementById('agentLogToggle').classList.toggle('expanded', agentLogOpen);
+  document.getElementById('agentLogBody').classList.toggle('open', agentLogOpen);
+  if (agentLogOpen && agentLogTaskId) {
+    loadAgentLog(agentLogTaskId);
+  }
+}
+
+async function loadAgentLog(taskId) {
+  try {
+    const res = await fetch(`/api/tasks/${taskId}/logs`);
+    const logs = await res.json();
+    renderAgentLog(logs);
+  } catch(e) {
+    console.error('Failed to load agent log', e);
+  }
+}
+
+function renderAgentLog(logs) {
+  const list = document.getElementById('agentLogList');
+  if (!list) return;
+  if (!logs.length) {
+    list.innerHTML = '<div class="activity-empty">No log entries yet.</div>';
+    return;
+  }
+  const levelColors = { info: 'var(--blue)', warn: 'var(--orange)', error: 'var(--red)' };
+  const levelIcons = { info: 'ℹ️', warn: '⚠️', error: '❌' };
+  list.innerHTML = logs.map(entry => `
+    <div class="activity-item">
+      <div class="activity-icon" style="background:rgba(116,185,255,0.15);color:${levelColors[entry.level] || 'var(--blue)'};">${levelIcons[entry.level] || 'ℹ️'}</div>
+      <div class="activity-content">
+        <div class="activity-text" style="font-family:monospace;font-size:12px;color:${levelColors[entry.level] || 'var(--text)'}">${esc(entry.message)}</div>
+        <div class="activity-meta">
+          <span style="color:${levelColors[entry.level] || 'var(--text-dim)'}">${entry.level}</span>
+          <span>·</span>
+          <span>${entry.agentSessionId ? esc(entry.agentSessionId.slice(0, 10)) + '...' : 'system'}</span>
+          <span>·</span>
+          <span>${formatRelTime(entry.timestamp)}</span>
+        </div>
+      </div>
+    </div>
+  `).join('');
+  list.scrollTop = list.scrollHeight;
+}
+
+function startAgentLogRefresh(taskId) {
+  stopAgentLogRefresh();
+  agentLogRefreshInterval = setInterval(() => {
+    if (agentLogOpen && agentLogTaskId) loadAgentLog(agentLogTaskId);
+  }, 10000);
+  const note = document.getElementById('agentLogRefreshNote');
+  if (note) note.textContent = 'Auto-refreshing every 10s while card is in-progress';
+}
+
+function stopAgentLogRefresh() {
+  if (agentLogRefreshInterval) {
+    clearInterval(agentLogRefreshInterval);
+    agentLogRefreshInterval = null;
+  }
+}
+
 function toggleHandoff() {
   handoffOpen = !handoffOpen;
   document.getElementById('handoffToggle').classList.toggle('expanded', handoffOpen);
@@ -3334,6 +3435,7 @@ async function deleteComment(id) {
 }
 
 function closeModal() {
+  stopAgentLogRefresh();
   document.getElementById('modal').classList.remove('open');
   // Restore body scroll
   document.body.style.overflow = '';

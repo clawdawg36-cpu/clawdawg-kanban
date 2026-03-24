@@ -487,6 +487,35 @@ app.post('/api/tasks/:id/handoff', (req, res) => {
   res.status(201).json(entry);
 });
 
+// ─── Agent Logs ───────────────────────────────────────────────────────────────
+
+// POST /api/tasks/:id/logs — append a log entry (called by agents)
+app.post('/api/tasks/:id/logs', (req, res) => {
+  const task = db.prepare('SELECT id FROM tasks WHERE id = ?').get(req.params.id);
+  if (!task) return res.status(404).json({ error: 'Not found' });
+
+  const entry = {
+    taskId: req.params.id,
+    agentSessionId: req.body.agentSessionId || null,
+    level: ['info', 'warn', 'error'].includes(req.body.level) ? req.body.level : 'info',
+    message: (req.body.message || '').trim(),
+    timestamp: new Date().toISOString(),
+  };
+  if (!entry.message) return res.status(400).json({ error: 'message required' });
+
+  const result = db.prepare(
+    'INSERT INTO agent_logs (taskId, agentSessionId, level, message, timestamp) VALUES (?, ?, ?, ?, ?)'
+  ).run(entry.taskId, entry.agentSessionId, entry.level, entry.message, entry.timestamp);
+
+  res.status(201).json({ id: result.lastInsertRowid, ...entry });
+});
+
+// GET /api/tasks/:id/logs — get all log entries for a task
+app.get('/api/tasks/:id/logs', (req, res) => {
+  const rows = db.prepare('SELECT * FROM agent_logs WHERE taskId = ? ORDER BY timestamp ASC').all(req.params.id);
+  res.json(rows);
+});
+
 // Delete task
 app.delete('/api/tasks/:id', (req, res) => {
   db.prepare('DELETE FROM tasks WHERE id = ?').run(req.params.id);
