@@ -3265,7 +3265,7 @@ function render() {
     frag.appendChild(noRes);
     list.innerHTML = '';
     list.appendChild(frag);
-    const hasFiltersActive = q || filterPriority || filterAssignee || activeFilter !== 'all';
+    const hasFiltersActive = q || filterPriority || filterAssignee;
     if (filtered.length === 0) {
       noRes.innerHTML = hasFiltersActive
         ? 'No matching cards'
@@ -3308,7 +3308,7 @@ function render() {
   }
 
   // Update results info
-  const hasFilters = q || filterPriority || filterAssignee || activeFilter !== 'all';
+  const hasFilters = q || filterPriority || filterAssignee;
   const infoEl = document.getElementById('searchResultsInfo');
   const resetBtn = document.getElementById('searchResetBtn');
   if (hasFilters) {
@@ -3400,7 +3400,7 @@ function cardHTML(t, q) {
     <div class="card-actions">
       ${(t.column === 'backlog' && !t.lockedBy && !isBlocked(t.id)) ? `<button class="card-action-btn" onclick="spawnAgent('${t.id}', event)" title="Run agent" aria-label="Run agent for ${esc(t.title)}">▶</button>` : ''}
       <button class="card-action-btn" onclick="editTask('${t.id}')" title="Edit card" aria-label="Edit ${esc(t.title)}">&#9998;</button>
-      <button class="card-action-btn delete" onclick="deleteTask('${t.id}')" title="Delete card" aria-label="Delete ${esc(t.title)}">&times;</button>
+      <button class="card-action-btn delete" onclick="deleteTask('${t.id}', event)" title="Delete card" aria-label="Delete ${esc(t.title)}">&times;</button>
     </div>
     <div class="card-title">${q ? highlightText(t.title, q) : esc(t.title)}</div>
     ${t.description ? `<div class="card-desc">${q ? highlightText(t.description, q) : esc(t.description)}</div>` : ''}
@@ -3576,27 +3576,6 @@ document.querySelectorAll('.card-list').forEach(list => {
   });
 });
 
-// Filter (header assignee buttons)
-document.querySelectorAll('.filter-btn').forEach(btn => {
-  btn.addEventListener('click', () => {
-    document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-    activeFilter = btn.dataset.filter;
-    // Sync assignee dropdown if applicable
-    const sel = document.getElementById('filterAssignee');
-    if (sel) {
-      if (btn.dataset.filter === 'all') {
-        sel.value = '';
-        filterAssignee = '';
-      } else {
-        sel.value = btn.dataset.filter;
-        filterAssignee = btn.dataset.filter;
-      }
-    }
-    render();
-  });
-});
-
 // Search & Filter Bar listeners
 (function() {
   const searchInput = document.getElementById('searchInput');
@@ -3637,17 +3616,6 @@ document.querySelectorAll('.filter-btn').forEach(btn => {
   if (filterAssigneeEl) {
     filterAssigneeEl.addEventListener('change', () => {
       filterAssignee = filterAssigneeEl.value;
-      // Sync the header buttons to 'all' if dropdown set to empty
-      if (!filterAssignee) {
-        activeFilter = 'all';
-        document.querySelectorAll('.filter-btn').forEach(b => {
-          b.classList.toggle('active', b.dataset.filter === 'all');
-        });
-      } else {
-        activeFilter = 'all'; // let dropdown take over, clear header btn
-        document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
-        document.querySelector('.filter-btn[data-filter="all"]').classList.add('active');
-      }
       render();
     });
   }
@@ -3987,7 +3955,7 @@ function renderActivity() {
     const icon = a.type === 'move' ? '↔' : a.type === 'created' ? '✦' : '💬';
     const time = formatRelTime(a.createdAt);
     const deleteBtn = a.type === 'comment'
-      ? `<button class="activity-delete" onclick="deleteComment('${a.id}')" title="Delete">×</button>`
+      ? `<button class="activity-delete" onclick="deleteComment('${a.id}', event)" title="Delete" aria-label="Delete comment">×</button>`
       : '';
     return `<div class="activity-item" data-aid="${a.id}">
       <div class="activity-icon ${esc(a.type)}">${icon}</div>
@@ -4349,7 +4317,7 @@ function renderAttachments(taskId, attachments) {
           <a class="attachment-name" href="/uploads/${a.filename}" target="_blank" download="${a.original_name}" title="${a.original_name}">${a.original_name}</a>
           <span class="attachment-size">${sizeStr} · ${new Date(a.uploadedAt).toLocaleDateString()}</span>
         </div>
-        <button class="attachment-remove" onclick="deleteAttachment('${a.id}', '${taskId}')" title="Remove">✕</button>
+        <button class="attachment-remove" onclick="deleteAttachment('${a.id}', '${taskId}', event)" title="Remove" aria-label="Remove attachment">✕</button>
       </div>`;
   }).join('');
 }
