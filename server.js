@@ -435,21 +435,28 @@ app.post('/api/tasks/:id/spawn', async (req, res) => {
     }
 
     // Read project agentConfig for model/timeout overrides
+    // Note: agentConfig may be the JSON string "null" — always fall back to {}
     const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(task.projectId || 'default');
-    const agentConfig = project && project.agentConfig ? JSON.parse(project.agentConfig) : {};
+    let agentConfig = {};
+    if (project && project.agentConfig) {
+      try {
+        const parsed = JSON.parse(project.agentConfig);
+        agentConfig = (parsed && typeof parsed === 'object') ? parsed : {};
+      } catch(e) { /* malformed JSON — keep default */ }
+    }
 
-    // Read auth token
+    // Read auth token from openclaw.json (gateway.auth.token)
     let authToken = process.env.OPENCLAW_TOKEN;
     if (!authToken) {
       try {
         const configPath = require('path').join(require('os').homedir(), '.openclaw', 'openclaw.json');
         const config = JSON.parse(require('fs').readFileSync(configPath, 'utf8'));
-        authToken = config?.auth?.token || config?.gateway?.auth?.token ||
+        authToken = config?.gateway?.auth?.token || config?.auth?.token ||
           (config?.auth?.profiles && Object.values(config.auth.profiles)[0]?.token);
       } catch(e) { /* no token found */ }
     }
 
-    // Build spawn payload
+    // Build task prompt
     const taskDetails = [
       `# Task: ${task.title}`,
       task.description ? `\n## Description\n${task.description}` : '',
@@ -459,38 +466,48 @@ app.post('/api/tasks/:id/spawn', async (req, res) => {
       task.tags ? `\n## Tags\n${JSON.parse(task.tags || '[]').join(', ')}` : '',
     ].join('');
 
-    const spawnPayload = {
-      task: `Read /Users/mike/.openclaw/workspace/SUBAGENTS.md first.\n\n${taskDetails}`,
-      mode: 'run',
-      ...(agentConfig.model ? { model: agentConfig.model } : {}),
-      ...(agentConfig.timeoutSeconds ? { runTimeoutSeconds: agentConfig.timeoutSeconds } : {}),
-    };
+    const taskPrompt = `Read /Users/mike/.openclaw/workspace/SUBAGENTS.md first.\n\n${taskDetails}`;
 
-    // Call gateway spawn endpoint
-    const gatewayRes = await fetch('http://localhost:18789/api/sessions/spawn', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(authToken ? { 'Authorization': `Bearer ${authToken}` } : {}),
-      },
-      body: JSON.stringify(spawnPayload),
+    // Spawn via openclaw agent CLI as a detached background process.
+    // The gateway uses WebSocket RPC (not HTTP REST) for session spawning, so we
+    // invoke the CLI directly. We fire-and-forget and return a session key immediately.
+    const os = require('os');
+    const crypto = require('crypto');
+    const sessionKey = `kanban-${task.id}-${crypto.randomBytes(4).toString('hex')}`;
+
+    // Write prompt to a temp file to avoid shell escaping issues
+    const tmpFile = require('path').join(os.tmpdir(), `kanban-spawn-${sessionKey}.txt`);
+    require('fs').writeFileSync(tmpFile, taskPrompt, 'utf8');
+
+    // Spawn openclaw agent as a detached background process (fire-and-forget)
+    const { spawn } = require('child_process');
+    const agentArgs = [
+      'agent',
+      '--session-id', sessionKey,
+      '--message', taskPrompt,
+    ];
+    if (agentConfig.model) agentArgs.push('--agent', agentConfig.model);
+
+    const env = { ...process.env, HOME: require('os').homedir() };
+    if (authToken) env.OPENCLAW_TOKEN = authToken;
+
+    const child = spawn('/opt/homebrew/bin/openclaw', agentArgs, {
+      detached: true,
+      stdio: 'ignore',
+      env,
     });
+    child.unref();
 
-    if (!gatewayRes.ok) {
-      const errText = await gatewayRes.text();
-      return res.status(502).json({ error: 'Gateway spawn failed', details: errText });
-    }
-
-    const spawnResult = await gatewayRes.json();
-    const sessionId = spawnResult.sessionKey || spawnResult.sessionId || spawnResult.id || 'unknown';
+    // Clean up temp file after a short delay
+    setTimeout(() => { try { require('fs').unlinkSync(tmpFile); } catch(e) {} }, 5000);
 
     // Lock the card and store agent session ID
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
     const nowIso = now.toISOString();
     db.prepare('UPDATE tasks SET lockedBy = ?, lockedAt = ?, lockExpiresAt = ?, agentSessionId = ?, agentStartedAt = ?, "column" = ? WHERE id = ?')
-      .run(sessionId, nowIso, expiresAt, sessionId, nowIso, 'in-progress', task.id);
+      .run(sessionKey, nowIso, expiresAt, sessionKey, nowIso, 'in-progress', task.id);
 
-    res.json({ sessionId, taskId: task.id, status: 'spawned' });
+    res.json({ sessionKey, sessionId: sessionKey, taskId: task.id, status: 'spawned' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
