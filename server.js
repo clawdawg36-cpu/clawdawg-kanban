@@ -1616,6 +1616,97 @@ app.get('/api/tasks/:id/logs', (req, res) => {
   }
 });
 
+// POST /api/tasks/bulk — perform a bulk action on multiple tasks
+// Body: { ids: string[], action: 'move' | 'delete', data?: { column?: string } }
+// Returns: { affected: number, results: [...] }
+app.post('/api/tasks/bulk', (req, res) => {
+  try {
+    const { ids, action, data } = req.body;
+
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ error: 'ids must be a non-empty array' });
+    }
+    if (ids.length > 200) {
+      return res.status(400).json({ error: 'Cannot bulk-operate on more than 200 tasks at once' });
+    }
+    if (!['move', 'delete'].includes(action)) {
+      return res.status(400).json({ error: 'action must be one of: move, delete' });
+    }
+
+    if (action === 'move') {
+      const newCol = data && data.column;
+      if (!newCol || !VALID_COLUMNS.includes(newCol)) {
+        return res.status(400).json({ error: `data.column must be one of: ${VALID_COLUMNS.join(', ')}` });
+      }
+
+      const now = new Date().toISOString();
+      const results = [];
+
+      const bulkMove = db.transaction(() => {
+        for (const id of ids) {
+          const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id);
+          if (!task) { results.push({ id, ok: false, error: 'Not found' }); continue; }
+          if (task.column === newCol) { results.push({ id, ok: true, skipped: true }); continue; }
+
+          db.prepare('UPDATE tasks SET "column" = ? WHERE id = ?').run(newCol, id);
+
+          // Activity log
+          const actId = Date.now().toString(36) + Math.random().toString(36).slice(2, 9);
+          db.prepare(
+            'INSERT INTO card_activity (id, taskId, type, content, author, createdAt) VALUES (?, ?, ?, ?, ?, ?)'
+          ).run(actId, id, 'move', `Moved from ${COL_LABELS[task.column] || task.column} → ${COL_LABELS[newCol] || newCol} (bulk)`, 'System', now);
+
+          db.prepare(
+            'INSERT INTO notifications (task_id, task_title, from_col, to_col, changed_by, created_at) VALUES (?, ?, ?, ?, ?, ?)'
+          ).run(id, task.title, task.column, newCol, 'System', now);
+
+          results.push({ id, ok: true });
+        }
+      });
+      bulkMove();
+
+      // SSE broadcast per task
+      const projectId = (ids.length > 0 && db.prepare('SELECT projectId FROM tasks WHERE id = ?').get(ids[0]))?.projectId || 'default';
+      sseBroadcast(projectId, 'task.updated', { bulkMove: true, ids, column: newCol });
+
+      return res.json({ affected: results.filter(r => r.ok && !r.skipped).length, results });
+    }
+
+    if (action === 'delete') {
+      const results = [];
+
+      const bulkDelete = db.transaction(() => {
+        for (const id of ids) {
+          const task = db.prepare('SELECT id, projectId FROM tasks WHERE id = ?').get(id);
+          if (!task) { results.push({ id, ok: false, error: 'Not found' }); continue; }
+
+          db.prepare('DELETE FROM agent_logs WHERE taskId = ?').run(id);
+          db.prepare('DELETE FROM handoff_log WHERE taskId = ?').run(id);
+          db.prepare('DELETE FROM card_activity WHERE taskId = ?').run(id);
+          db.prepare('DELETE FROM notifications WHERE task_id = ?').run(id);
+          db.prepare('DELETE FROM task_dependencies WHERE blocker_id = ? OR blocked_id = ?').run(id, id);
+          db.prepare('DELETE FROM attachments WHERE task_id = ?').run(id);
+          db.prepare('DELETE FROM tasks WHERE id = ?').run(id);
+
+          results.push({ id, ok: true });
+        }
+      });
+      bulkDelete();
+
+      // SSE broadcast
+      const projectIds = new Set(ids.map(() => 'default'));
+      for (const pid of projectIds) {
+        sseBroadcast(pid, 'task.deleted', { bulkDelete: true, ids });
+      }
+
+      return res.json({ affected: results.filter(r => r.ok).length, results });
+    }
+  } catch (err) {
+    console.error('POST /api/tasks/bulk error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // Delete task
 app.delete('/api/tasks/:id', (req, res) => {
   try {

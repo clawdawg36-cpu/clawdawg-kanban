@@ -1730,6 +1730,91 @@ input[type="date"] {
   display: flex;
 }
 
+/* ===== CHIP TAG EDITOR ===== */
+.tag-chip-editor {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  cursor: text;
+  transition: var(--transition);
+  min-height: 42px;
+}
+.tag-chip-editor:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-glow);
+}
+.tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: rgba(108, 92, 231, 0.15);
+  color: #a29bfe;
+  white-space: nowrap;
+  user-select: none;
+}
+.tag-chip-remove {
+  background: none;
+  border: none;
+  color: #a29bfe;
+  cursor: pointer;
+  padding: 0 0 0 2px;
+  font-size: 13px;
+  line-height: 1;
+  opacity: 0.7;
+  transition: opacity 0.15s;
+}
+.tag-chip-remove:hover { opacity: 1; }
+.tag-chip-input {
+  flex: 1 1 80px;
+  min-width: 60px;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 14px;
+  padding: 2px 0;
+}
+.tag-chip-input::placeholder { color: var(--text-dim); }
+.tag-autocomplete {
+  position: relative;
+}
+.tag-autocomplete-list {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  z-index: 2000;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+  max-height: 160px;
+  overflow-y: auto;
+}
+.tag-autocomplete-item {
+  padding: 8px 12px;
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+  transition: background 0.1s;
+}
+.tag-autocomplete-item:hover,
+.tag-autocomplete-item.active {
+  background: var(--accent-glow);
+  color: #a29bfe;
+}
+
 /* ===== MOBILE STYLES ===== */
 @media (max-width: 768px) {
   body {
@@ -2532,6 +2617,152 @@ input[type="date"] {
   }
 }
 
+/* ─── Bulk Selection ──────────────────────────────────────────────────────── */
+
+/* Select mode toggle button in header */
+.select-mode-btn {
+  padding: 7px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-dim);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: var(--transition);
+}
+.select-mode-btn:hover {
+  border-color: var(--accent);
+  color: var(--text);
+  background: var(--surface2);
+}
+.select-mode-btn.active {
+  background: var(--accent-glow);
+  border-color: var(--accent);
+  color: #a29bfe;
+}
+
+/* Card checkbox overlay */
+.card-checkbox-wrap {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 10;
+  display: none;
+}
+body.select-mode .card-checkbox-wrap {
+  display: flex;
+}
+body.select-mode .card-actions {
+  display: none !important;
+}
+body.select-mode .card {
+  cursor: pointer;
+  user-select: none;
+}
+body.select-mode .card:hover {
+  border-color: var(--accent);
+}
+body.select-mode .card.selected {
+  border-color: var(--accent);
+  background: rgba(108, 92, 231, 0.12);
+  box-shadow: 0 0 0 2px var(--accent-glow);
+}
+
+.card-checkbox {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+/* Bulk action toolbar */
+#bulkToolbar {
+  position: fixed;
+  bottom: 28px;
+  left: 50%;
+  transform: translateX(-50%) translateY(80px);
+  z-index: 150;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 18px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.4), 0 0 0 1px rgba(108,92,231,0.2);
+  transition: transform 0.25s cubic-bezier(0.4,0,0.2,1), opacity 0.25s;
+  opacity: 0;
+  pointer-events: none;
+  white-space: nowrap;
+}
+#bulkToolbar.visible {
+  transform: translateX(-50%) translateY(0);
+  opacity: 1;
+  pointer-events: all;
+}
+
+.bulk-count {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent);
+  min-width: 60px;
+}
+.bulk-divider {
+  width: 1px;
+  height: 22px;
+  background: var(--border);
+}
+.bulk-action-label {
+  font-size: 12px;
+  color: var(--text-dim);
+  font-weight: 500;
+}
+.bulk-move-select {
+  padding: 6px 10px;
+  border-radius: 7px;
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  outline: none;
+  transition: var(--transition);
+}
+.bulk-move-select:focus {
+  border-color: var(--accent);
+}
+.bulk-btn {
+  padding: 7px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: var(--transition);
+}
+.bulk-btn:hover {
+  border-color: var(--accent);
+  background: var(--accent-glow);
+  color: #a29bfe;
+}
+.bulk-btn.danger {
+  border-color: rgba(225,112,85,0.4);
+  color: var(--red);
+}
+.bulk-btn.danger:hover {
+  background: rgba(225,112,85,0.15);
+  border-color: var(--red);
+}
+.bulk-btn.deselect {
+  color: var(--text-dim);
+}
+
 /* ─── Inline Confirmation ──────────────────────────────────────────────────── */
 .inline-confirm {
   display: inline-flex;
@@ -2635,6 +2866,68 @@ input[type="date"] {
   transition: var(--transition);
 }
 .confirm-modal-confirm:hover { filter: brightness(1.12); }
+
+/* ─── Keyboard Shortcuts Overlay ─────────────────────────────────────────────── */
+#kbdOverlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 9000;
+  background: rgba(0,0,0,0.65);
+  backdrop-filter: blur(4px);
+  place-items: center;
+}
+#kbdOverlay.open { display: grid; }
+.kbd-box {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 28px 32px;
+  min-width: 340px;
+  max-width: 480px;
+  box-shadow: 0 8px 40px rgba(0,0,0,0.5);
+}
+.kbd-box h2 {
+  font-size: 16px;
+  font-weight: 700;
+  margin-bottom: 18px;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.kbd-box h2 span { color: var(--accent); }
+.kbd-table { width: 100%; border-collapse: collapse; }
+.kbd-table tr + tr td { border-top: 1px solid var(--border); }
+.kbd-table td {
+  padding: 8px 4px;
+  font-size: 13px;
+  color: var(--text-dim);
+  vertical-align: middle;
+}
+.kbd-table td:first-child {
+  width: 120px;
+  padding-right: 16px;
+  white-space: nowrap;
+}
+kbd {
+  display: inline-block;
+  padding: 2px 7px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--surface2);
+  font-family: 'SF Mono', ui-monospace, monospace;
+  font-size: 11px;
+  color: var(--text);
+  line-height: 1.6;
+  box-shadow: 0 1px 0 var(--border);
+}
+.kbd-close-hint {
+  margin-top: 18px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-dim);
+}
 </style>
 </head>
 <body>
@@ -2676,6 +2969,7 @@ input[type="date"] {
         </div>
       </div>
     </div>
+    <button class="select-mode-btn" id="selectModeBtn" onclick="toggleSelectMode()" title="Toggle card selection mode">☑ Select</button>
     <button class="filter-btn" onclick="openStats()">📊 Stats</button>
     <button class="btn-add" onclick="openModal()">+ New Task</button>
   </div>
@@ -2901,8 +3195,14 @@ input[type="date"] {
       <input type="number" id="fWave" placeholder="e.g. 0, 1, 2..." min="0">
     </div>
     <div class="field">
-      <label>Tags (comma-separated)</label>
-      <input type="text" id="fTags" placeholder="bug, frontend">
+      <label>Tags</label>
+      <div class="tag-autocomplete" id="tagAutocompleteWrapper">
+        <div class="tag-chip-editor" id="tagChipEditor" onclick="document.getElementById('tagChipInput').focus()">
+          <!-- chips injected here -->
+          <input class="tag-chip-input" id="tagChipInput" type="text" placeholder="Add tag…" autocomplete="off">
+        </div>
+        <div class="tag-autocomplete-list" id="tagAutocompleteList" style="display:none"></div>
+      </div>
     </div>
     <!-- Checklist / Subtasks -->
     <div class="checklist-section" id="checklistSection">
@@ -3813,7 +4113,143 @@ function resetSearch() {
   render();
 }
 
-// Checklist / subtasks state
+// ─── Chip Tag Editor ─────────────────────────────────────────────────────────
+let currentTags = []; // array of normalized lowercase strings
+let tagSuggestions = []; // available suggestions from project tasks
+let tagAutoIndex = -1; // keyboard nav index in autocomplete list
+
+function initTagEditor(tags) {
+  currentTags = (tags || []).map(t => t.toLowerCase());
+  tagSuggestions = [];
+  tagAutoIndex = -1;
+  renderTagChips();
+  // Fetch suggestions from all tasks in the active project
+  fetch(`/api/tasks?projectId=${encodeURIComponent(activeProjectId)}`)
+    .then(r => r.json())
+    .then(all => {
+      const seen = new Set();
+      all.forEach(t => (t.tags || []).forEach(tag => seen.add(tag.toLowerCase())));
+      tagSuggestions = Array.from(seen).sort();
+    })
+    .catch(() => {});
+
+  const input = document.getElementById('tagChipInput');
+  const list = document.getElementById('tagAutocompleteList');
+
+  input.oninput = () => {
+    tagAutoIndex = -1;
+    showTagAutocomplete(input.value.trim());
+  };
+
+  input.onkeydown = (e) => {
+    const items = list.querySelectorAll('.tag-autocomplete-item');
+    if (e.key === 'Enter' || e.key === ',') {
+      e.preventDefault();
+      if (tagAutoIndex >= 0 && items[tagAutoIndex]) {
+        addTag(items[tagAutoIndex].dataset.tag);
+      } else {
+        const val = input.value.replace(/,/g, '').trim();
+        if (val) addTag(val);
+      }
+    } else if (e.key === 'Backspace' && input.value === '' && currentTags.length > 0) {
+      removeTag(currentTags.length - 1);
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      tagAutoIndex = Math.min(tagAutoIndex + 1, items.length - 1);
+      updateAutoActiveClass(items);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      tagAutoIndex = Math.max(tagAutoIndex - 1, -1);
+      updateAutoActiveClass(items);
+    } else if (e.key === 'Escape') {
+      hideTagAutocomplete();
+    }
+  };
+
+  input.onblur = () => {
+    // Delay hide so clicks on autocomplete items register first
+    setTimeout(() => {
+      const val = input.value.replace(/,/g, '').trim();
+      if (val) addTag(val);
+      hideTagAutocomplete();
+    }, 150);
+  };
+}
+
+function updateAutoActiveClass(items) {
+  items.forEach((el, i) => {
+    el.classList.toggle('active', i === tagAutoIndex);
+  });
+}
+
+function showTagAutocomplete(query) {
+  const list = document.getElementById('tagAutocompleteList');
+  const input = document.getElementById('tagChipInput');
+  if (!query) { hideTagAutocomplete(); return; }
+  const lq = query.toLowerCase();
+  const matches = tagSuggestions.filter(t =>
+    t.includes(lq) && !currentTags.includes(t)
+  ).slice(0, 8);
+  if (!matches.length) { hideTagAutocomplete(); return; }
+  list.innerHTML = matches.map(t =>
+    `<div class="tag-autocomplete-item" data-tag="${esc(t)}">${esc(t)}</div>`
+  ).join('');
+  list.querySelectorAll('.tag-autocomplete-item').forEach(el => {
+    el.onmousedown = (e) => {
+      e.preventDefault();
+      addTag(el.dataset.tag);
+    };
+  });
+  list.style.display = '';
+}
+
+function hideTagAutocomplete() {
+  const list = document.getElementById('tagAutocompleteList');
+  if (list) { list.style.display = 'none'; list.innerHTML = ''; }
+  tagAutoIndex = -1;
+}
+
+function addTag(raw) {
+  const tag = raw.toLowerCase().trim();
+  if (!tag) return;
+  if (currentTags.includes(tag)) {
+    document.getElementById('tagChipInput').value = '';
+    hideTagAutocomplete();
+    return;
+  }
+  currentTags.push(tag);
+  document.getElementById('tagChipInput').value = '';
+  hideTagAutocomplete();
+  renderTagChips();
+}
+
+function removeTag(index) {
+  currentTags.splice(index, 1);
+  renderTagChips();
+  document.getElementById('tagChipInput').focus();
+}
+
+function renderTagChips() {
+  const editor = document.getElementById('tagChipEditor');
+  const input = document.getElementById('tagChipInput');
+  // Remove all chips (keep the input element)
+  Array.from(editor.querySelectorAll('.tag-chip')).forEach(c => c.remove());
+  // Re-insert chips before the input
+  currentTags.forEach((tag, i) => {
+    const chip = document.createElement('span');
+    chip.className = 'tag-chip';
+    chip.innerHTML = `${esc(tag)}<button class="tag-chip-remove" type="button" title="Remove" onclick="removeTag(${i})">×</button>`;
+    editor.insertBefore(chip, input);
+  });
+  // Update placeholder
+  input.placeholder = currentTags.length ? '' : 'Add tag…';
+}
+
+function getTagsFromEditor() {
+  return [...currentTags];
+}
+
+// ─── Checklist / subtasks state ───────────────────────────────────────────────
 let currentChecklist = []; // [{id, text, done}]
 
 function renderChecklist() {
@@ -3879,7 +4315,7 @@ function applyTemplate() {
   const tmpl = currentTemplates.find(t => t.id === tmplId);
   if (!tmpl) return;
   document.getElementById('fDesc').value = tmpl.defaultDescription || '';
-  document.getElementById('fTags').value = (tmpl.defaultTags || []).join(', ');
+  initTagEditor(tmpl.defaultTags || []);
   document.getElementById('fAssignee').value = tmpl.defaultAssignee || 'Mike';
   document.getElementById('fPriority').value = tmpl.defaultPriority || 'medium';
 }
@@ -3954,7 +4390,7 @@ function openModal(task) {
   document.getElementById('fPriority').value = task ? task.priority : 'medium';
   document.getElementById('fColumn').value = task ? task.column : 'backlog';
   document.getElementById('fDueDate').value = task && task.dueDate ? task.dueDate : '';
-  document.getElementById('fTags').value = task ? (task.tags || []).join(', ') : '';
+  initTagEditor(task ? (task.tags || []) : []);
   document.getElementById('fRecurring').value = (task && task.recurring) ? task.recurring : '';
   document.getElementById('fWave').value = (task && task.wave != null) ? task.wave : '';
 
@@ -4414,7 +4850,6 @@ function clearModalError() {
 
 async function saveTask() {
   const id = document.getElementById('taskId').value;
-  const tagsRaw = document.getElementById('fTags').value;
   const data = {
     title: document.getElementById('fTitle').value.trim(),
     description: document.getElementById('fDesc').value.trim(),
@@ -4422,7 +4857,7 @@ async function saveTask() {
     priority: document.getElementById('fPriority').value,
     column: document.getElementById('fColumn').value,
     dueDate: document.getElementById('fDueDate').value || null,
-    tags: tagsRaw ? tagsRaw.split(',').map(s => s.trim()).filter(Boolean) : [],
+    tags: getTagsFromEditor(),
     recurring: document.getElementById('fRecurring').value || null,
     subtasks: currentChecklist.length > 0 ? currentChecklist : null,
     wave: document.getElementById('fWave').value !== '' ? parseInt(document.getElementById('fWave').value) : null,
@@ -4952,6 +5387,115 @@ document.addEventListener('keydown', e => {
   }
 });
 
+// ─── Global Keyboard Shortcuts ────────────────────────────────────────────────
+// Track the most recently hovered card
+let _hoveredCardId = null;
+
+document.addEventListener('mouseover', e => {
+  const card = e.target.closest('.card');
+  _hoveredCardId = card ? card.dataset.id : null;
+}, { passive: true });
+
+document.addEventListener('mouseout', e => {
+  const card = e.target.closest('.card');
+  if (card && card.dataset.id === _hoveredCardId) {
+    // Only clear if we actually left the card (not a child element)
+    if (!card.contains(e.relatedTarget)) _hoveredCardId = null;
+  }
+}, { passive: true });
+
+function openKbdOverlay() {
+  document.getElementById('kbdOverlay').classList.add('open');
+}
+function closeKbdOverlay() {
+  document.getElementById('kbdOverlay').classList.remove('open');
+}
+
+// Helper: return the card ID to act on (hovered > focused)
+function _activeCardId() {
+  if (_hoveredCardId) return _hoveredCardId;
+  const focused = document.activeElement;
+  if (focused && focused.classList.contains('card')) return focused.dataset.id;
+  return null;
+}
+
+// Helper: check if keyboard focus is in an editable element
+function _inEditableField(e) {
+  const tag = (e.target.tagName || '').toLowerCase();
+  if (['input', 'textarea', 'select'].includes(tag)) return true;
+  if (e.target.isContentEditable) return true;
+  return false;
+}
+
+// Global shortcut handler
+document.addEventListener('keydown', e => {
+  // Skip modifier combos handled elsewhere (Cmd+K etc.)
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+
+  // Skip if any overlay/modal is open (let them handle their own keys)
+  if (document.getElementById('kbdOverlay').classList.contains('open')) {
+    if (e.key === 'Escape') { e.preventDefault(); closeKbdOverlay(); }
+    return;
+  }
+
+  // Skip if typing in a field
+  if (_inEditableField(e)) return;
+
+  // Skip if any task/confirm modal is open (Escape is handled by existing listener)
+  const modal = document.getElementById('taskModal');
+  if (modal && modal.classList.contains('open')) return;
+  if (document.getElementById('confirmModal').classList.contains('open')) return;
+
+  switch (e.key) {
+    case 'n':
+    case 'N':
+      e.preventDefault();
+      openModal();
+      break;
+
+    case 'e':
+    case 'E': {
+      const id = _activeCardId();
+      if (id) { e.preventDefault(); editTask(id); }
+      break;
+    }
+
+    case 'Delete':
+    case 'Backspace': {
+      // Only act when no card has keyboard focus (that case is handled by the
+      // card-level listener above); here we act on the hovered card.
+      if (_hoveredCardId) { e.preventDefault(); deleteTask(_hoveredCardId); }
+      break;
+    }
+
+    case '/':
+      e.preventDefault();
+      (function() {
+        const si = document.getElementById('searchInput');
+        if (si) { si.focus(); si.select(); }
+      })();
+      break;
+
+    case '1':
+    case '2':
+    case '3':
+    case '4':
+    case '5': {
+      if (!isMobile()) break;
+      e.preventDefault();
+      const tabs = [...document.querySelectorAll('.mobile-col-tab')];
+      const idx = parseInt(e.key, 10) - 1;
+      if (tabs[idx]) tabs[idx].click();
+      break;
+    }
+
+    case '?':
+      e.preventDefault();
+      openKbdOverlay();
+      break;
+  }
+});
+
 // ─── Project Sidebar ──────────────────────────────────────────────────────────
 let projects = [];
 // Determine active project: URL param > localStorage > default
@@ -5406,6 +5950,24 @@ connectSSE();
 </script>
 
 <!-- Confirmation Modal (for destructive project deletes) -->
+<!-- Bulk Action Toolbar -->
+<div id="bulkToolbar" role="toolbar" aria-label="Bulk actions">
+  <span class="bulk-count" id="bulkCount">0 selected</span>
+  <div class="bulk-divider"></div>
+  <span class="bulk-action-label">Move to</span>
+  <select class="bulk-move-select" id="bulkMoveSelect" onchange="bulkMoveSelected(this.value)">
+    <option value="">— column —</option>
+    <option value="idea">Idea</option>
+    <option value="backlog">Backlog</option>
+    <option value="in-progress">In Progress</option>
+    <option value="in-review">In Review</option>
+    <option value="done">Done</option>
+  </select>
+  <div class="bulk-divider"></div>
+  <button class="bulk-btn danger" onclick="bulkDeleteSelected()">🗑 Delete</button>
+  <button class="bulk-btn deselect" onclick="clearBulkSelection()">✕ Deselect all</button>
+</div>
+
 <div id="confirmModal" onclick="if(event.target===this)_confirmModalReject()">
   <div class="confirm-modal-box" role="dialog" aria-modal="true" aria-labelledby="confirmModalTitle">
     <h3 id="confirmModalTitle">Are you sure?</h3>
@@ -5414,6 +5976,24 @@ connectSSE();
       <button class="confirm-modal-cancel" onclick="_confirmModalReject()">Cancel</button>
       <button class="confirm-modal-confirm" id="confirmModalOk" onclick="_confirmModalResolve()">Delete</button>
     </div>
+  </div>
+</div>
+
+<!-- Keyboard Shortcuts Overlay -->
+<div id="kbdOverlay" onclick="if(event.target===this)closeKbdOverlay()" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">
+  <div class="kbd-box">
+    <h2>⌨️ <span>Keyboard Shortcuts</span></h2>
+    <table class="kbd-table">
+      <tr><td><kbd>N</kbd></td><td>New task</td></tr>
+      <tr><td><kbd>E</kbd></td><td>Edit hovered / focused card</td></tr>
+      <tr><td><kbd>Delete</kbd> / <kbd>⌫</kbd></td><td>Delete hovered / focused card</td></tr>
+      <tr><td><kbd>/</kbd></td><td>Focus search input</td></tr>
+      <tr><td><kbd>1</kbd> – <kbd>5</kbd></td><td>Switch mobile column tab</td></tr>
+      <tr><td><kbd>⌘K</kbd> / <kbd>Ctrl K</kbd></td><td>Project switcher</td></tr>
+      <tr><td><kbd>Esc</kbd></td><td>Close modal / overlay</td></tr>
+      <tr><td><kbd>?</kbd></td><td>Show this overlay</td></tr>
+    </table>
+    <p class="kbd-close-hint">Press <kbd>Esc</kbd> or click outside to close</p>
   </div>
 </div>
 </body>
