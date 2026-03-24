@@ -1434,6 +1434,39 @@ input[type="date"] {
 
 .search-reset-btn.visible { display: block; }
 
+/* Agent filter toggles */
+.search-toggle-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.search-toggle-btn {
+  padding: 6px 11px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-dim);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: var(--transition);
+  white-space: nowrap;
+  user-select: none;
+}
+
+.search-toggle-btn:hover {
+  background: var(--surface2);
+  color: var(--text);
+}
+
+.search-toggle-btn.active {
+  border-color: var(--accent);
+  background: var(--accent-glow);
+  color: #a29bfe;
+}
+
 /* card highlight for matched text */
 .card .highlight {
   background: rgba(108, 92, 231, 0.35);
@@ -4753,7 +4786,15 @@ function closeStats() {
 
 // Close stats on Escape
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape') { closeModal(); closeStats(); }
+  if (e.key === 'Escape') {
+    // Dismiss confirm modal first if open
+    if (document.getElementById('confirmModal').classList.contains('open')) {
+      if (_confirmModalReject) _confirmModalReject();
+      return;
+    }
+    closeModal();
+    closeStats();
+  }
 });
 
 // Keyboard accessibility for card elements

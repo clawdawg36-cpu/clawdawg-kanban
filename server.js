@@ -1753,7 +1753,23 @@ app.get('/api/dependencies', (req, res) => {
   try {
     const limit = Math.min(parseInt(req.query.limit, 10) || 100, 500);
     const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
-    const rows = db.prepare('SELECT blocker_id, blocked_id FROM task_dependencies LIMIT ? OFFSET ?').all(limit, offset);
+    const projectId = req.query.projectId || null;
+
+    let query, params;
+    if (projectId) {
+      // Filter to dependencies where either blocker or blocked task belongs to the project
+      query = `SELECT d.blocker_id, d.blocked_id FROM task_dependencies d
+               INNER JOIN tasks t ON (t.id = d.blocker_id OR t.id = d.blocked_id)
+               WHERE t.projectId = ?
+               GROUP BY d.blocker_id, d.blocked_id
+               LIMIT ? OFFSET ?`;
+      params = [projectId, limit, offset];
+    } else {
+      query = 'SELECT blocker_id, blocked_id FROM task_dependencies LIMIT ? OFFSET ?';
+      params = [limit, offset];
+    }
+
+    const rows = db.prepare(query).all(...params);
     res.json(rows);
   } catch (err) {
     console.error(err);
