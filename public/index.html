@@ -3229,6 +3229,19 @@ function retryLoad() {
   loadTasks();
 }
 
+function populateWaveSelect() {
+  const el = document.getElementById('filterWave');
+  if (!el) return;
+  // Collect unique non-null wave values from loaded tasks
+  const waves = [...new Set(
+    tasks.map(t => t.wave).filter(w => w != null && w !== '')
+  )].sort((a, b) => Number(a) - Number(b));
+  // Rebuild options (keep "All" as first)
+  el.innerHTML = '<option value="">All</option>' +
+    '<option value="none">No Wave</option>' +
+    waves.map(w => `<option value="${w}" ${filterWave == w ? 'selected' : ''}>Wave ${w}</option>`).join('');
+}
+
 async function loadTasks() {
   showBoardLoading();
   try {
@@ -3241,6 +3254,7 @@ async function loadTasks() {
     dependencies = await depsRes.json();
     hideBoardLoading();
     hideBoardError();
+    populateWaveSelect();
     render();
     // Update sidebar count for active project
     projectTaskCounts[activeProjectId] = tasks.length;
@@ -3400,6 +3414,16 @@ function render() {
     infoEl.classList.remove('active');
     resetBtn.classList.remove('visible');
   }
+
+  // Update active state visual on new filter controls
+  const fw = document.getElementById('filterWave');
+  const fas = document.getElementById('filterAgentStatus');
+  const fb = document.getElementById('filterBlocked');
+  const fo = document.getElementById('filterOverdue');
+  if (fw) fw.classList.toggle('active', filterWave !== '');
+  if (fas) fas.classList.toggle('active', !!filterAgentStatus);
+  if (fb) fb.classList.toggle('active', filterBlocked);
+  if (fo) fo.classList.toggle('active', filterOverdue);
 }
 
 function dueBadgeHTML(dueDate) {
@@ -3700,12 +3724,49 @@ document.querySelectorAll('.card-list').forEach(list => {
       render();
     });
   }
+
+  const filterWaveEl = document.getElementById('filterWave');
+  const filterAgentStatusEl = document.getElementById('filterAgentStatus');
+  const filterBlockedBtn = document.getElementById('filterBlocked');
+  const filterOverdueBtn = document.getElementById('filterOverdue');
+
+  if (filterWaveEl) {
+    filterWaveEl.addEventListener('change', () => {
+      filterWave = filterWaveEl.value;
+      render();
+    });
+  }
+
+  if (filterAgentStatusEl) {
+    filterAgentStatusEl.addEventListener('change', () => {
+      filterAgentStatus = filterAgentStatusEl.value;
+      render();
+    });
+  }
+
+  if (filterBlockedBtn) {
+    filterBlockedBtn.addEventListener('click', () => {
+      filterBlocked = !filterBlocked;
+      render();
+    });
+  }
+
+  if (filterOverdueBtn) {
+    filterOverdueBtn.addEventListener('click', () => {
+      filterOverdue = !filterOverdue;
+      render();
+    });
+  }
 })();
 
 function resetSearch() {
   searchQuery = '';
   filterPriority = '';
   filterAssignee = '';
+  filterWave = '';
+  filterAgentStatus = '';
+  filterBlocked = false;
+  filterOverdue = false;
   const si = document.getElementById('searchInput');
   if (si) si.value = '';
   const sc = document.getElementById('searchClear');
@@ -3714,6 +3775,14 @@ function resetSearch() {
   if (fp) fp.value = '';
   const fa = document.getElementById('filterAssignee');
   if (fa) { fa.value = ''; fa.classList.remove('active'); }
+  const fw = document.getElementById('filterWave');
+  if (fw) { fw.value = ''; fw.classList.remove('active'); }
+  const fas = document.getElementById('filterAgentStatus');
+  if (fas) { fas.value = ''; fas.classList.remove('active'); }
+  const fb = document.getElementById('filterBlocked');
+  if (fb) fb.classList.remove('active');
+  const fo = document.getElementById('filterOverdue');
+  if (fo) fo.classList.remove('active');
   render();
 }
 
