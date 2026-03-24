@@ -1282,6 +1282,9 @@ app.put('/api/tasks/:id', (req, res) => {
     }
   }
 
+  // Fan-out SSE event to connected clients for this project
+  sseBroadcast(updated.projectId || 'default', 'task.updated', { task: updated });
+
   res.json(updated);
   } catch (err) {
     console.error(err);
@@ -1465,7 +1468,7 @@ app.get('/api/tasks/:id/handoff', (req, res) => {
 // POST /api/tasks/:id/logs — append a log entry (called by agents)
 app.post('/api/tasks/:id/logs', (req, res) => {
   try {
-    const task = db.prepare('SELECT id FROM tasks WHERE id = ?').get(req.params.id);
+    const task = db.prepare('SELECT id, projectId FROM tasks WHERE id = ?').get(req.params.id);
     if (!task) return res.status(404).json({ error: 'Not found' });
 
     const entry = {
@@ -1481,7 +1484,12 @@ app.post('/api/tasks/:id/logs', (req, res) => {
       'INSERT INTO agent_logs (taskId, agentSessionId, level, message, timestamp) VALUES (?, ?, ?, ?, ?)'
     ).run(entry.taskId, entry.agentSessionId, entry.level, entry.message, entry.timestamp);
 
-    res.status(201).json({ id: result.lastInsertRowid, ...entry });
+    const logEntry = { id: result.lastInsertRowid, ...entry };
+
+    // Fan-out SSE log.created event to connected clients for this project
+    sseBroadcast(task.projectId || 'default', 'log.created', { log: logEntry });
+
+    res.status(201).json(logEntry);
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Internal server error" });
@@ -1522,6 +1530,10 @@ app.get('/api/tasks/:id/logs', (req, res) => {
 // Delete task
 app.delete('/api/tasks/:id', (req, res) => {
   try {
+    // Capture projectId before deletion for SSE fan-out
+    const taskRow = db.prepare('SELECT id, projectId FROM tasks WHERE id = ?').get(req.params.id);
+    const deletedProjectId = taskRow ? (taskRow.projectId || 'default') : 'default';
+
     const deleteTask = db.transaction(() => {
       const taskId = req.params.id;
       // Cascade cleanup of all child tables (foreign_keys pragma not enabled, so manual)
@@ -1534,6 +1546,10 @@ app.delete('/api/tasks/:id', (req, res) => {
       db.prepare('DELETE FROM tasks WHERE id = ?').run(taskId);
     });
     deleteTask();
+
+    // Fan-out SSE event to connected clients for this project
+    sseBroadcast(deletedProjectId, 'task.deleted', { taskId: req.params.id });
+
     res.status(204).end();
   } catch (err) {
     console.error('DELETE /api/tasks/:id error:', err);

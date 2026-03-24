@@ -1764,6 +1764,24 @@ input[type="date"] {
     padding: 0 0 80px;
     gap: 0;
     min-height: calc(100vh - 140px);
+    position: relative;
+  }
+
+  /* Loading overlay on mobile — show only first skeleton column */
+  #boardLoadingOverlay {
+    flex-direction: column;
+    padding: 16px 16px 80px;
+  }
+
+  .board-loading-col {
+    min-width: 0;
+    max-width: 100%;
+    width: 100%;
+  }
+
+  /* Hide extra skeleton columns on mobile */
+  #boardLoadingOverlay .board-loading-col:not(:first-child) {
+    display: none;
   }
 
   .column {
@@ -3234,15 +3252,25 @@ document.querySelectorAll('.card-list').forEach(list => {
     list.classList.remove('drag-over');
     if (!dragId) return;
     const newCol = list.dataset.col;
-    await fetch(`/api/tasks/${dragId}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ column: newCol }),
-    });
     const task = tasks.find(t => t.id === dragId);
+    const originalCol = task ? task.column : null;
+    // Optimistically update
     if (task) task.column = newCol;
     render();
-    loadNotifications();
+    try {
+      const res = await fetch(`/api/tasks/${dragId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ column: newCol }),
+      });
+      if (!res.ok) throw new Error(`Server error: ${res.status}`);
+      loadNotifications();
+    } catch (err) {
+      // Revert to original column
+      if (task && originalCol) task.column = originalCol;
+      render();
+      showToast(`Failed to move card: ${err.message}`, 'error');
+    }
   });
 });
 
@@ -3852,9 +3880,14 @@ function editTask(id) {
 
 async function deleteTask(id) {
   if (!confirm('Delete this task?')) return;
-  await fetch(`/api/tasks/${id}`, { method: 'DELETE' });
-  tasks = tasks.filter(t => t.id !== id);
-  render();
+  try {
+    const res = await fetch(`/api/tasks/${id}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error(`Server error: ${res.status}`);
+    tasks = tasks.filter(t => t.id !== id);
+    render();
+  } catch (err) {
+    showToast(`Failed to delete task: ${err.message}`, 'error');
+  }
 }
 
 async function spawnAgent(taskId, e) {
@@ -3871,7 +3904,7 @@ async function spawnAgent(taskId, e) {
     const res = await fetch(`/api/tasks/${taskId}/spawn`, { method: 'POST' });
     const result = await res.json();
     if (!res.ok) {
-      alert('Failed to spawn agent: ' + (result.error || res.statusText));
+      showToast('Failed to spawn agent: ' + (result.error || res.statusText), 'error');
       btn.textContent = '▶';
       btn.disabled = false;
       return;
@@ -3879,10 +3912,24 @@ async function spawnAgent(taskId, e) {
     // Reload tasks to reflect new state
     await loadTasks();
   } catch(err) {
-    alert('Error: ' + err.message);
+    showToast('Error spawning agent: ' + err.message, 'error');
     btn.textContent = '▶';
     btn.disabled = false;
   }
+}
+
+function showModalError(message) {
+  const banner = document.getElementById('modalErrorBanner');
+  const text = document.getElementById('modalErrorText');
+  if (banner && text) {
+    text.textContent = message;
+    banner.classList.add('visible');
+  }
+}
+
+function clearModalError() {
+  const banner = document.getElementById('modalErrorBanner');
+  if (banner) banner.classList.remove('visible');
 }
 
 async function saveTask() {
@@ -3902,27 +3949,41 @@ async function saveTask() {
   };
   if (!data.title) { document.getElementById('fTitle').focus(); return; }
 
-  if (id) {
-    const res = await fetch(`/api/tasks/${id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
-    });
-    const updated = await res.json();
-    const idx = tasks.findIndex(t => t.id === id);
-    if (idx !== -1) tasks[idx] = updated;
-  } else {
-    data.projectId = activeProjectId;
-    const res = await fetch('/api/tasks', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
-    });
-    tasks.push(await res.json());
+  clearModalError();
+  const saveBtn = document.getElementById('btnSaveTask');
+  if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Saving…'; }
+
+  try {
+    if (id) {
+      const res = await fetch(`/api/tasks/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error(`Server error: ${res.status} ${res.statusText}`);
+      const updated = await res.json();
+      const idx = tasks.findIndex(t => t.id === id);
+      if (idx !== -1) tasks[idx] = updated;
+    } else {
+      data.projectId = activeProjectId;
+      const res = await fetch('/api/tasks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error(`Server error: ${res.status} ${res.statusText}`);
+      tasks.push(await res.json());
+    }
+    closeModal();
+    render();
+    loadNotifications();
+  } catch (err) {
+    // Keep modal open — show inline error so user can retry
+    showModalError('Failed to save task: ' + err.message);
+    showToast('Failed to save task — please try again', 'error');
+  } finally {
+    if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Save Task'; }
   }
-  closeModal();
-  render();
-  loadNotifications();
 }
 
 // ─── Attachments ──────────────────────────────────────────────────────────────
@@ -4294,8 +4355,10 @@ if (!new URLSearchParams(window.location.search).get('project')) {
 }
 
 async function loadProjects() {
+  showBoardLoading();
   try {
     const res = await fetch('/api/projects');
+    if (!res.ok) throw new Error(`Server error: ${res.status} ${res.statusText}`);
     projects = await res.json();
     // Fetch task counts for each project
     const countPromises = projects.map(p =>
@@ -4306,8 +4369,10 @@ async function loadProjects() {
     counts.forEach(c => { projectTaskCounts[c.id] = c.count; });
     renderSidebar();
     updateHeaderTitle();
+    // hideBoardLoading is handled by loadTasks() which is called next
   } catch (e) {
     console.error('Failed to load projects', e);
+    showBoardError(`Failed to load projects: ${e.message}`);
   }
 }
 
