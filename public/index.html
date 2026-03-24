@@ -3312,6 +3312,7 @@ let currentHandoffLog = [];
 let agentLogOpen = false;
 let agentLogTaskId = null;
 let agentLogRefreshInterval = null;
+let agentLogLastTimestamp = null; // tracks the last seen log entry timestamp for incremental fetches
 
 function toggleAgentLog() {
   agentLogOpen = !agentLogOpen;
@@ -3322,11 +3323,24 @@ function toggleAgentLog() {
   }
 }
 
-async function loadAgentLog(taskId) {
+async function loadAgentLog(taskId, incremental = false) {
   try {
-    const res = await fetch(`/api/tasks/${taskId}/logs`);
+    // On initial load fetch the most recent 100 entries; on incremental refresh use ?since= for efficiency
+    let url = `/api/tasks/${taskId}/logs?limit=100`;
+    if (incremental && agentLogLastTimestamp) {
+      url += `&since=${encodeURIComponent(agentLogLastTimestamp)}`;
+    }
+    const res = await fetch(url);
     const logs = await res.json();
-    renderAgentLog(logs);
+    if (incremental && agentLogLastTimestamp) {
+      appendAgentLog(logs);
+    } else {
+      renderAgentLog(logs);
+    }
+    // Update last seen timestamp for next incremental fetch
+    if (logs.length > 0) {
+      agentLogLastTimestamp = logs[logs.length - 1].timestamp;
+    }
   } catch(e) {
     console.error('Failed to load agent log', e);
   }
@@ -3339,9 +3353,25 @@ function renderAgentLog(logs) {
     list.innerHTML = '<div class="activity-empty">No log entries yet.</div>';
     return;
   }
+  list.innerHTML = buildAgentLogHTML(logs);
+  list.scrollTop = list.scrollHeight;
+}
+
+function appendAgentLog(logs) {
+  if (!logs.length) return;
+  const list = document.getElementById('agentLogList');
+  if (!list) return;
+  // Remove "no entries" placeholder if present
+  const empty = list.querySelector('.activity-empty');
+  if (empty) empty.remove();
+  list.insertAdjacentHTML('beforeend', buildAgentLogHTML(logs));
+  list.scrollTop = list.scrollHeight;
+}
+
+function buildAgentLogHTML(logs) {
   const levelColors = { info: 'var(--blue)', warn: 'var(--orange)', error: 'var(--red)' };
   const levelIcons = { info: 'ℹ️', warn: '⚠️', error: '❌' };
-  list.innerHTML = logs.map(entry => `
+  return logs.map(entry => `
     <div class="activity-item">
       <div class="activity-icon" style="background:rgba(116,185,255,0.15);color:${levelColors[entry.level] || 'var(--blue)'};">${levelIcons[entry.level] || 'ℹ️'}</div>
       <div class="activity-content">
@@ -3356,13 +3386,12 @@ function renderAgentLog(logs) {
       </div>
     </div>
   `).join('');
-  list.scrollTop = list.scrollHeight;
 }
 
 function startAgentLogRefresh(taskId) {
   stopAgentLogRefresh();
   agentLogRefreshInterval = setInterval(() => {
-    if (agentLogOpen && agentLogTaskId) loadAgentLog(agentLogTaskId);
+    if (agentLogOpen && agentLogTaskId) loadAgentLog(agentLogTaskId, true);
   }, 10000);
   const note = document.getElementById('agentLogRefreshNote');
   if (note) note.textContent = 'Auto-refreshing every 10s while card is in-progress';
