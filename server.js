@@ -386,6 +386,142 @@ app.delete('/api/projects/:id', (req, res) => {
   }
 });
 
+// ─── Export / Import ─────────────────────────────────────────────────────────
+
+// GET /api/projects/:id/export?format=json|csv
+app.get('/api/projects/:id/export', (req, res) => {
+  try {
+    const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id);
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+    const tasks = db.prepare('SELECT * FROM tasks WHERE projectId = ?').all(req.params.id);
+    const format = (req.query.format || 'json').toLowerCase();
+    if (format === 'json') {
+      const snapshot = {
+        exportedAt: new Date().toISOString(),
+        project: { ...project, agentConfig: project.agentConfig ? JSON.parse(project.agentConfig) : null },
+        tasks: tasks.map(t => ({
+          ...t,
+          tags: JSON.parse(t.tags || '[]'),
+          subtasks: t.subtasks ? JSON.parse(t.subtasks) : null,
+          blockedBy: t.blockedBy ? JSON.parse(t.blockedBy) : [],
+        })),
+      };
+      res.setHeader('Content-Disposition', `attachment; filename="project-${req.params.id}-export.json"`);
+      res.setHeader('Content-Type', 'application/json');
+      return res.json(snapshot);
+    }
+    if (format === 'csv') {
+      const CSV_FIELDS = ['id', 'title', 'description', 'assignee', 'priority', 'tags', 'column', 'createdAt', 'dueDate', 'recurring', 'projectId', 'wave'];
+      const escapeCsv = (val) => {
+        if (val === null || val === undefined) return '';
+        const str = String(val).replace(/"/g, '""');
+        return /[,"\n\r]/.test(str) ? `"${str}"` : str;
+      };
+      const header = CSV_FIELDS.join(',');
+      const rows = tasks.map(t => CSV_FIELDS.map(f => {
+        if (f === 'tags') return escapeCsv(JSON.parse(t.tags || '[]').join(';'));
+        return escapeCsv(t[f]);
+      }).join(','));
+      const csv = [header, ...rows].join('\n');
+      res.setHeader('Content-Disposition', `attachment; filename="project-${req.params.id}-export.csv"`);
+      res.setHeader('Content-Type', 'text/csv');
+      return res.send(csv);
+    }
+    return res.status(400).json({ error: 'Invalid format. Use: json or csv' });
+  } catch (err) {
+    console.error('GET /api/projects/:id/export error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// POST /api/projects/:id/import
+// Body: { tasks: [...] } or bare array
+// Sanitizes string fields to strip HTML tags before inserting into DB.
+app.post('/api/projects/:id/import', (req, res) => {
+  try {
+    const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id);
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+
+    const incoming = req.body;
+    if (!incoming || typeof incoming !== 'object') {
+      return res.status(400).json({ error: 'Request body must be a JSON object' });
+    }
+
+    let taskList = null;
+    if (Array.isArray(incoming)) {
+      taskList = incoming;
+    } else if (Array.isArray(incoming.tasks)) {
+      taskList = incoming.tasks;
+    } else {
+      return res.status(400).json({ error: 'Body must be { tasks: [...] } or a task array' });
+    }
+
+    if (taskList.length === 0) return res.status(400).json({ error: 'tasks array is empty' });
+    if (taskList.length > 500) return res.status(400).json({ error: 'Cannot import more than 500 tasks at once' });
+
+    const IMPORT_ALLOWED_COLUMNS = new Set(['idea', 'backlog', 'in-progress', 'in-review', 'done']);
+    const IMPORT_ALLOWED_PRIORITIES = new Set(['urgent', 'high', 'medium', 'low']);
+
+    // Strip HTML tags from string fields to prevent stored XSS via imported data
+    const stripHtml = (str) => String(str || '').replace(/<[^>]*>/g, '');
+
+    const importTasks = db.transaction(() => {
+      const imported = [];
+      let skipped = 0;
+      const now = new Date().toISOString();
+
+      for (const raw of taskList) {
+        if (!raw || typeof raw !== 'object') { skipped++; continue; }
+        const title = stripHtml((raw.title || '').trim());
+        if (!title) { skipped++; continue; }
+
+        const col = IMPORT_ALLOWED_COLUMNS.has(raw.column) ? raw.column : 'backlog';
+        const pri = IMPORT_ALLOWED_PRIORITIES.has(raw.priority) ? raw.priority : 'medium';
+        const rawTags = Array.isArray(raw.tags) ? raw.tags : (typeof raw.tags === 'string' ? raw.tags.split(';').map(t => t.trim()).filter(Boolean) : []);
+        const tags = rawTags.map(t => stripHtml(String(t)));
+        const blockedBy = Array.isArray(raw.blockedBy) ? raw.blockedBy : [];
+        const wave = Number.isInteger(raw.wave) && raw.wave >= 0 ? raw.wave : null;
+        const dueDate = raw.dueDate ? String(raw.dueDate).slice(0, 10) : null;
+        const subtasks = raw.subtasks ? JSON.stringify(raw.subtasks) : null;
+
+        const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+        db.prepare(
+          'INSERT INTO tasks (id, title, description, assignee, priority, tags, "column", createdAt, dueDate, recurring, subtasks, projectId, wave, blockedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        ).run(
+          id,
+          title,
+          stripHtml(raw.description || ''),
+          stripHtml(raw.assignee || 'Mike'),
+          pri,
+          JSON.stringify(tags),
+          col,
+          now,
+          dueDate,
+          raw.recurring ? stripHtml(raw.recurring) : null,
+          subtasks,
+          req.params.id,
+          wave,
+          JSON.stringify(blockedBy)
+        );
+
+        const actId = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+        db.prepare(
+          'INSERT INTO card_activity (id, taskId, type, content, author, createdAt) VALUES (?, ?, ?, ?, ?, ?)'
+        ).run(actId, id, 'created', `Card imported into ${COL_LABELS[col] || col}`, stripHtml(raw.assignee || 'Mike'), now);
+
+        imported.push(id);
+      }
+      return { imported, skipped };
+    });
+
+    const result = importTasks();
+    res.status(201).json({ imported: result.imported.length, skipped: result.skipped, taskIds: result.imported });
+  } catch (err) {
+    console.error('POST /api/projects/:id/import error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // ─── Templates ───────────────────────────────────────────────────────────────
 
 // GET /api/templates?projectId=x
@@ -441,7 +577,19 @@ app.get('/api/tasks', (req, res) => {
   try {
     const projectId = req.query.projectId || 'default';
     // Lock expiry is handled by background cleanup (see setInterval below) — no UPDATE here
-    const rows = db.prepare("SELECT * FROM tasks WHERE projectId = ?").all(projectId);
+    let rows = db.prepare("SELECT * FROM tasks WHERE projectId = ?").all(projectId);
+
+    // ?tag=<value> — filter in JS after fetch (safe: avoids SQL LIKE injection / ReDoS).
+    // Tags are stored as JSON arrays; use exact Array.includes() match.
+    if (req.query.tag !== undefined) {
+      const filterTag = req.query.tag;
+      rows = rows.filter(row => {
+        try {
+          return JSON.parse(row.tags || '[]').includes(filterTag);
+        } catch { return false; }
+      });
+    }
+
     // Compute blocked status for each task
     const doneIds = new Set(rows.filter(r => r.column === 'done').map(r => r.id));
     res.json(rows.map(row => ({
