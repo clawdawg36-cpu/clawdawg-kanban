@@ -62,21 +62,37 @@ Mike can add tasks for ClawDawg directly on the board, and ClawDawg can add task
 
 ## Database Backup & Restore
 
-The server automatically backs up the SQLite database every **6 hours** to `kanban.db.bak` in the project root (first backup runs 30 seconds after startup).
+The server automatically creates a timestamped SQLite backup every **6 hours** in `backups/` (first backup runs 30 seconds after startup). Files are named like `kanban.db.bak.YYYYMMDD-HHMMSS`, and by default the newest **5** backups are retained.
+
+Optional off-host sync is available via environment variables:
+
+```bash
+export KANBAN_BACKUP_KEEP=5
+export KANBAN_BACKUP_SYNC_BIN=rclone
+export KANBAN_BACKUP_SYNC_ARGS_JSON='["copyto","{file}","remote:kanban-backups/{name}"]'
+```
+
+For tools like `rsync`, pass args as a JSON array too, for example:
+
+```bash
+export KANBAN_BACKUP_SYNC_BIN=rsync
+export KANBAN_BACKUP_SYNC_ARGS_JSON='["-az","{file}","backup-host:/srv/kanban/"]'
+```
+
+`{file}` is replaced with the full path of the freshly-created backup file, and `{name}` is replaced with just the rotated filename.
 
 ### Manual backup
 
 ```bash
-# Copy the live DB while the server is running — better-sqlite3 handles this safely via its backup API.
-# Or just copy the file while the server is stopped:
-cp kanban.db kanban.db.bak
+node -e "const db=require('./db'); db.runBackup().finally(() => db.close())"
 ```
 
 ### Restore from backup
 
 ```bash
-# Stop the server first, then:
-cp kanban.db.bak kanban.db
+# Stop the server first, then pick a rotated backup:
+ls -1 backups/kanban.db.bak.* | tail -n 5
+cp backups/kanban.db.bak.YYYYMMDD-HHMMSS kanban.db
 node server.js
 ```
 
@@ -85,8 +101,9 @@ node server.js
 If the server refuses to start with a corruption error:
 
 1. Stop the server
-2. Restore from backup: `cp kanban.db.bak kanban.db`
-3. Restart: `node server.js`
+2. Pick the newest healthy rotated backup from `backups/`
+3. Restore it: `cp backups/kanban.db.bak.YYYYMMDD-HHMMSS kanban.db`
+4. Restart: `node server.js`
 
 If no backup exists, remove the corrupted file to start fresh (all data will be lost):
 
@@ -95,43 +112,7 @@ rm kanban.db
 node server.js
 ```
 
-> **Note:** `kanban.db`, `kanban.db.bak`, `kanban.db-shm`, and `kanban.db-wal` are gitignored and will never be committed.
-
-## Database Backup & Restore
-
-The server automatically backs up the SQLite database every **6 hours** to `kanban.db.bak` in the project root (first backup runs 30 seconds after startup).
-
-### Manual backup
-
-```bash
-# Copy the file while the server is stopped:
-cp kanban.db kanban.db.bak
-```
-
-### Restore from backup
-
-```bash
-# Stop the server first, then:
-cp kanban.db.bak kanban.db
-node server.js
-```
-
-### If the database is corrupted
-
-If the server refuses to start with a corruption error:
-
-1. Stop the server
-2. Restore from backup: `cp kanban.db.bak kanban.db`
-3. Restart: `node server.js`
-
-If no backup exists, remove the corrupted file to start fresh (all data will be lost):
-
-```bash
-rm kanban.db
-node server.js
-```
-
-> **Note:** `kanban.db`, `kanban.db.bak`, `kanban.db-shm`, and `kanban.db-wal` are gitignored and will never be committed.
+> **Note:** `kanban.db`, `kanban.db.bak*`, `kanban.db-shm`, and `kanban.db-wal` are gitignored and will never be committed.
 
 ---
 

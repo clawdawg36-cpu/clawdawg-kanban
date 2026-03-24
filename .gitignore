@@ -8,3 +8,5 @@ tasks.json
 *.db-wal
 .DS_Store
 *.db.bak
+
+backups/
