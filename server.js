@@ -546,17 +546,9 @@ app.put('/api/tasks/:id', (req, res) => {
     createdAt: existing.createdAt,
   };
 
-  // Handle blockedBy sync to task_dependencies
+  // Resolve blockedBy before transaction
   if (req.body.blockedBy !== undefined) {
-    const blockedByArr = Array.isArray(req.body.blockedBy) ? req.body.blockedBy : [];
-    updated.blockedBy = blockedByArr;
-    // Sync to task_dependencies: clear existing blockers for this task, re-insert from blockedBy
-    db.prepare('DELETE FROM task_dependencies WHERE blocked_id = ?').run(updated.id);
-    for (const blockerId of blockedByArr) {
-      if (blockerId !== updated.id) {
-        db.prepare('INSERT OR IGNORE INTO task_dependencies (blocker_id, blocked_id) VALUES (?, ?)').run(blockerId, updated.id);
-      }
-    }
+    updated.blockedBy = Array.isArray(req.body.blockedBy) ? req.body.blockedBy : [];
   } else {
     updated.blockedBy = existing.blockedBy ? JSON.parse(existing.blockedBy) : [];
   }
@@ -571,72 +563,97 @@ app.put('/api/tasks/:id', (req, res) => {
   // Handle wave field — use clientUpdate value if provided, else keep existing
   updated.wave = clientUpdate.wave !== undefined ? clientUpdate.wave : (existing.wave !== undefined ? existing.wave : null);
 
-  db.prepare(
-    'UPDATE tasks SET title = ?, description = ?, assignee = ?, priority = ?, tags = ?, "column" = ?, dueDate = ?, recurring = ?, subtasks = ?, projectId = ?, blockedBy = ?, wave = ?, agentSessionId = ?, agentStartedAt = ? WHERE id = ?'
-  ).run(updated.title, updated.description, updated.assignee, updated.priority, JSON.stringify(updated.tags), updated.column, updated.dueDate || null, updated.recurring || null, updated.subtasks ? JSON.stringify(updated.subtasks) : null, updated.projectId || 'default', JSON.stringify(updated.blockedBy), updated.wave, updated.agentSessionId, updated.agentStartedAt, updated.id);
+  // Track whether wave promotion happened (for webhook firing outside transaction)
+  let promotedWaveTasks = [];
+  let wavePromotionInfo = null;
+  // Track unblocked tasks for webhook firing outside transaction
+  let unblockedTasks = [];
 
-  // Auto-log column changes
-  if (req.body.column && req.body.column !== existing.column) {
-    const now = new Date().toISOString();
-    const actId = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
-    db.prepare(
-      'INSERT INTO card_activity (id, taskId, type, content, author, createdAt) VALUES (?, ?, ?, ?, ?, ?)'
-    ).run(actId, existing.id, 'move', `Moved from ${COL_LABELS[existing.column] || existing.column} → ${COL_LABELS[req.body.column] || req.body.column}`, 'System', now);
-    // Also track in notifications table
-    db.prepare(
-      'INSERT INTO notifications (task_id, task_title, from_col, to_col, changed_by, created_at) VALUES (?, ?, ?, ?, ?, ?)'
-    ).run(existing.id, existing.title, existing.column, req.body.column, updated.assignee || 'System', now);
-
-    // Recurring task: auto-create new card when moved to done
-    if (req.body.column === 'done' && existing.recurring) {
-      const newId = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
-      const newCreatedAt = new Date().toISOString();
-      db.prepare(
-        'INSERT INTO tasks (id, title, description, assignee, priority, tags, "column", createdAt, recurring, subtasks, projectId, wave) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-      ).run(newId, existing.title, existing.description, existing.assignee, existing.priority, existing.tags, 'backlog', newCreatedAt, existing.recurring, null, existing.projectId || 'default', existing.wave || null);
-      const recActId = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
-      db.prepare(
-        'INSERT INTO card_activity (id, taskId, type, content, author, createdAt) VALUES (?, ?, ?, ?, ?, ?)'
-      ).run(recActId, newId, 'created', `Recurring card created (${existing.recurring}) from completed task`, 'System', newCreatedAt);
-    }
-
-    // Fire webhooks
-    fireWebhook(updated.projectId || 'default', 'task.updated', { task: { ...updated, tags: JSON.stringify(updated.tags) } });
-
-    // Wave auto-promotion: when all tasks in wave N are done, promote wave N+1 to backlog
-    if (req.body.column === 'done' && updated.wave != null) {
-      const projectId = updated.projectId || 'default';
-      const waveN = updated.wave;
-      const waveTasks = db.prepare("SELECT id, \"column\" FROM tasks WHERE projectId = ? AND wave = ?").all(projectId, waveN);
-      // Check if all wave N tasks are done (treating the current task as done)
-      const allDone = waveTasks.every(t => t.id === updated.id ? true : t.column === 'done');
-      if (allDone) {
-        // Promote all wave N+1 tasks from idea to backlog
-        const nextWaveTasks = db.prepare("SELECT id FROM tasks WHERE projectId = ? AND wave = ? AND \"column\" = 'idea'").all(projectId, waveN + 1);
-        if (nextWaveTasks.length > 0) {
-          const promoteStmt = db.prepare("UPDATE tasks SET \"column\" = 'backlog' WHERE id = ?");
-          const promoteAll = db.transaction((tasks) => { for (const t of tasks) promoteStmt.run(t.id); });
-          promoteAll(nextWaveTasks);
-        }
-        // Fire layer.unlocked webhook
-        if (typeof fireWebhook === 'function') {
-          fireWebhook(projectId, 'layer.unlocked', { wave: waveN, nextWave: waveN + 1, promotedCount: nextWaveTasks.length, projectId });
+  // Wrap all DB writes in a single transaction
+  const updateTask = db.transaction(() => {
+    // Sync blockedBy to task_dependencies if changed
+    if (req.body.blockedBy !== undefined) {
+      db.prepare('DELETE FROM task_dependencies WHERE blocked_id = ?').run(updated.id);
+      for (const blockerId of updated.blockedBy) {
+        if (blockerId !== updated.id) {
+          db.prepare('INSERT OR IGNORE INTO task_dependencies (blocker_id, blocked_id) VALUES (?, ?)').run(blockerId, updated.id);
         }
       }
     }
 
-    // Check if this task being done unblocks others (task.unblocked event)
-    if (req.body.column === 'done') {
-      const unblocked = db.prepare("SELECT blocked_id FROM task_dependencies WHERE blocker_id = ?").all(existing.id);
-      for (const dep of unblocked) {
-        const blockedTask = db.prepare("SELECT * FROM tasks WHERE id = ?").get(dep.blocked_id);
-        if (blockedTask) {
-          const remainingBlockers = db.prepare("SELECT td.blocker_id FROM task_dependencies td INNER JOIN tasks t ON t.id = td.blocker_id WHERE td.blocked_id = ? AND t.column != 'done'").all(dep.blocked_id);
-          if (remainingBlockers.length === 0) {
-            fireWebhook(blockedTask.projectId || 'default', 'task.unblocked', { taskId: dep.blocked_id, task: blockedTask });
+    db.prepare(
+      'UPDATE tasks SET title = ?, description = ?, assignee = ?, priority = ?, tags = ?, "column" = ?, dueDate = ?, recurring = ?, subtasks = ?, projectId = ?, blockedBy = ?, wave = ?, agentSessionId = ?, agentStartedAt = ? WHERE id = ?'
+    ).run(updated.title, updated.description, updated.assignee, updated.priority, JSON.stringify(updated.tags), updated.column, updated.dueDate || null, updated.recurring || null, updated.subtasks ? JSON.stringify(updated.subtasks) : null, updated.projectId || 'default', JSON.stringify(updated.blockedBy), updated.wave, updated.agentSessionId, updated.agentStartedAt, updated.id);
+
+    // Auto-log column changes
+    if (req.body.column && req.body.column !== existing.column) {
+      const now = new Date().toISOString();
+      const actId = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+      db.prepare(
+        'INSERT INTO card_activity (id, taskId, type, content, author, createdAt) VALUES (?, ?, ?, ?, ?, ?)'
+      ).run(actId, existing.id, 'move', `Moved from ${COL_LABELS[existing.column] || existing.column} → ${COL_LABELS[req.body.column] || req.body.column}`, 'System', now);
+      // Also track in notifications table
+      db.prepare(
+        'INSERT INTO notifications (task_id, task_title, from_col, to_col, changed_by, created_at) VALUES (?, ?, ?, ?, ?, ?)'
+      ).run(existing.id, existing.title, existing.column, req.body.column, updated.assignee || 'System', now);
+
+      // Recurring task: auto-create new card when moved to done
+      if (req.body.column === 'done' && existing.recurring) {
+        const newId = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+        const newCreatedAt = new Date().toISOString();
+        db.prepare(
+          'INSERT INTO tasks (id, title, description, assignee, priority, tags, "column", createdAt, recurring, subtasks, projectId, wave) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        ).run(newId, existing.title, existing.description, existing.assignee, existing.priority, existing.tags, 'backlog', newCreatedAt, existing.recurring, null, existing.projectId || 'default', existing.wave || null);
+        const recActId = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+        db.prepare(
+          'INSERT INTO card_activity (id, taskId, type, content, author, createdAt) VALUES (?, ?, ?, ?, ?, ?)'
+        ).run(recActId, newId, 'created', `Recurring card created (${existing.recurring}) from completed task`, 'System', newCreatedAt);
+      }
+
+      // Wave auto-promotion: when all tasks in wave N are done, promote wave N+1 to backlog
+      if (req.body.column === 'done' && updated.wave != null) {
+        const projectId = updated.projectId || 'default';
+        const waveN = updated.wave;
+        const waveTasks = db.prepare("SELECT id, \"column\" FROM tasks WHERE projectId = ? AND wave = ?").all(projectId, waveN);
+        // Check if all wave N tasks are done (treating the current task as done)
+        const allDone = waveTasks.every(t => t.id === updated.id ? true : t.column === 'done');
+        if (allDone) {
+          // Promote all wave N+1 tasks from idea to backlog
+          const nextWaveTasks = db.prepare("SELECT id FROM tasks WHERE projectId = ? AND wave = ? AND \"column\" = 'idea'").all(projectId, waveN + 1);
+          if (nextWaveTasks.length > 0) {
+            const promoteStmt = db.prepare("UPDATE tasks SET \"column\" = 'backlog' WHERE id = ?");
+            for (const t of nextWaveTasks) promoteStmt.run(t.id);
+            promotedWaveTasks = nextWaveTasks;
+          }
+          wavePromotionInfo = { wave: waveN, nextWave: waveN + 1, promotedCount: nextWaveTasks ? nextWaveTasks.length : 0, projectId };
+        }
+      }
+
+      // Collect unblocked tasks for webhook firing after transaction
+      if (req.body.column === 'done') {
+        const unblocked = db.prepare("SELECT blocked_id FROM task_dependencies WHERE blocker_id = ?").all(existing.id);
+        for (const dep of unblocked) {
+          const blockedTask = db.prepare("SELECT * FROM tasks WHERE id = ?").get(dep.blocked_id);
+          if (blockedTask) {
+            const remainingBlockers = db.prepare("SELECT td.blocker_id FROM task_dependencies td INNER JOIN tasks t ON t.id = td.blocker_id WHERE td.blocked_id = ? AND t.column != 'done'").all(dep.blocked_id);
+            if (remainingBlockers.length === 0) {
+              unblockedTasks.push({ taskId: dep.blocked_id, task: blockedTask });
+            }
           }
         }
       }
+    }
+  });
+  updateTask();
+
+  // Fire webhooks outside the transaction (external side effects)
+  if (req.body.column && req.body.column !== existing.column) {
+    fireWebhook(updated.projectId || 'default', 'task.updated', { task: { ...updated, tags: JSON.stringify(updated.tags) } });
+    if (wavePromotionInfo) {
+      fireWebhook(wavePromotionInfo.projectId, 'layer.unlocked', wavePromotionInfo);
+    }
+    for (const u of unblockedTasks) {
+      fireWebhook(u.task.projectId || 'default', 'task.unblocked', { taskId: u.taskId, task: u.task });
     }
   }
 
