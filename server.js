@@ -1518,8 +1518,9 @@ app.get('/api/tasks/:id/handoff', (req, res) => {
     const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
 
     const log = task.handoffLog ? JSON.parse(task.handoffLog) : [];
-    const page = log.slice(offset, offset + limit);
-    res.json(page);
+    const total = log.length;
+    const items = log.slice(offset, offset + limit);
+    res.json({ total, limit, offset, items });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Internal server error" });
@@ -1656,8 +1657,10 @@ app.get('/api/tasks/:id/activity', (req, res) => {
   try {
     const limit = Math.min(parseInt(req.query.limit, 10) || 100, 500);
     const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
-    const rows = db.prepare('SELECT * FROM card_activity WHERE taskId = ? ORDER BY createdAt ASC LIMIT ? OFFSET ?').all(req.params.id, limit, offset);
-    res.json(rows);
+    const countRow = db.prepare('SELECT COUNT(*) as count FROM card_activity WHERE taskId = ?').get(req.params.id);
+    const total = countRow ? countRow.count : 0;
+    const items = db.prepare('SELECT * FROM card_activity WHERE taskId = ? ORDER BY createdAt ASC LIMIT ? OFFSET ?').all(req.params.id, limit, offset);
+    res.json({ total, limit, offset, items });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Internal server error" });
