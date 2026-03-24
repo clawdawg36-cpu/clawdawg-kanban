@@ -1,9 +1,71 @@
 const Database = require('better-sqlite3');
 const path = require('path');
 const fs = require('fs');
+const { execFileSync } = require('child_process');
 
 const DB_PATH = path.join(__dirname, 'kanban.db');
 const TASKS_JSON = path.join(__dirname, 'tasks.json');
+
+const BACKUP_DIR = path.join(__dirname, 'backups');
+const BACKUP_BASENAME = 'kanban.db.bak';
+const BACKUP_INTERVAL_MS = 6 * 60 * 60 * 1000;
+const BACKUP_RETENTION = Math.max(1, Number.parseInt(process.env.KANBAN_BACKUP_KEEP || '5', 10) || 5);
+const BACKUP_SYNC_BIN = (process.env.KANBAN_BACKUP_SYNC_BIN || '').trim();
+const BACKUP_SYNC_ARGS = (() => {
+  if (!process.env.KANBAN_BACKUP_SYNC_ARGS_JSON) return null;
+  try {
+    const parsed = JSON.parse(process.env.KANBAN_BACKUP_SYNC_ARGS_JSON);
+    return Array.isArray(parsed) ? parsed.map(v => String(v)) : null;
+  } catch (err) {
+    console.warn(`[kanban] WARNING: could not parse KANBAN_BACKUP_SYNC_ARGS_JSON: ${err.message}`);
+    return null;
+  }
+})();
+
+function formatBackupTimestamp(date = new Date()) {
+  const pad = value => String(value).padStart(2, '0');
+  return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`;
+}
+
+function listRotatedBackups() {
+  if (!fs.existsSync(BACKUP_DIR)) return [];
+  return fs.readdirSync(BACKUP_DIR)
+    .filter(name => name.startsWith(`${BACKUP_BASENAME}.`))
+    .sort()
+    .map(name => path.join(BACKUP_DIR, name));
+}
+
+function pruneOldBackups() {
+  const backups = listRotatedBackups();
+  const staleBackups = backups.slice(0, Math.max(0, backups.length - BACKUP_RETENTION));
+  for (const backupPath of staleBackups) {
+    try {
+      fs.unlinkSync(backupPath);
+      console.log(`[kanban] Pruned old backup ${path.basename(backupPath)}`);
+    } catch (err) {
+      console.warn(`[kanban] WARNING: failed to prune old backup ${backupPath}: ${err.message}`);
+    }
+  }
+}
+
+function syncBackupOffHost(backupPath) {
+  if (!BACKUP_SYNC_BIN) return;
+  if (!BACKUP_SYNC_ARGS || BACKUP_SYNC_ARGS.length === 0) {
+    console.warn('[kanban] WARNING: KANBAN_BACKUP_SYNC_BIN is set but KANBAN_BACKUP_SYNC_ARGS_JSON is missing or invalid; skipping off-host sync');
+    return;
+  }
+
+  const backupName = path.basename(backupPath);
+  const args = BACKUP_SYNC_ARGS.map(arg => arg.replaceAll('{file}', backupPath).replaceAll('{name}', backupName));
+  try {
+    execFileSync(BACKUP_SYNC_BIN, args, { stdio: 'pipe' });
+    console.log(`[kanban] Synced backup off-host via ${BACKUP_SYNC_BIN}: ${backupName}`);
+  } catch (err) {
+    const stderr = err.stderr?.toString().trim();
+    console.warn(`[kanban] WARNING: off-host backup sync failed for ${backupName}: ${stderr || err.message}`);
+  }
+}
+
 const TASKS_SCHEMA_V1_COLUMNS = [
   'dueDate',
   'recurring',
@@ -29,7 +91,7 @@ try {
   console.error(`[kanban] Fatal: could not open database at ${DB_PATH}`);
   console.error(`[kanban] Reason: ${err.message}`);
   console.error('[kanban] Check file permissions, available disk space, or whether the file is corrupted.');
-  console.error('[kanban] If the database is corrupted, try restoring from the most recent backup (kanban.db.bak).');
+  console.error(`[kanban] If the database is corrupted, try restoring from the most recent rotated backup in ${BACKUP_DIR}.`);
   process.exit(1);
 }
 
@@ -41,7 +103,7 @@ try {
   const result = rows[0]?.integrity_check ?? rows[0]?.['integrity_check'];
   if (result !== 'ok') {
     console.warn(`[kanban] WARNING: PRAGMA integrity_check returned: ${JSON.stringify(rows)}`);
-    console.warn('[kanban] The database may be corrupted. Consider restoring from backup (kanban.db.bak).');
+    console.warn(`[kanban] The database may be corrupted. Consider restoring from the most recent rotated backup in ${BACKUP_DIR}.`);
   }
 } catch (err) {
   console.warn(`[kanban] WARNING: integrity_check failed: ${err.message}`);
@@ -301,7 +363,6 @@ db.exec(`
     FOREIGN KEY (taskId) REFERENCES tasks(id) ON DELETE CASCADE
   )
 `);
-
 // Indexes for common query patterns
 db.exec(`
   CREATE INDEX IF NOT EXISTS idx_tasks_projectId ON tasks(projectId);
@@ -313,5 +374,34 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_notifications_task_id ON notifications(task_id);
   CREATE INDEX IF NOT EXISTS idx_notifications_project_id ON notifications(project_id);
 `);
+
+
+async function runBackup() {
+  try {
+    fs.mkdirSync(BACKUP_DIR, { recursive: true });
+    const backupPath = path.join(BACKUP_DIR, `${BACKUP_BASENAME}.${formatBackupTimestamp()}`);
+    await db.backup(backupPath);
+    console.log(`[kanban] Backup complete: ${backupPath}`);
+    pruneOldBackups();
+    syncBackupOffHost(backupPath);
+    return backupPath;
+  } catch (err) {
+    console.warn(`[kanban] WARNING: backup failed: ${err.message}`);
+    return null;
+  }
+}
+
+const startupBackupTimer = setTimeout(() => {
+  runBackup().catch(err => console.warn(`[kanban] WARNING: startup backup failed: ${err.message}`));
+}, 30 * 1000);
+if (typeof startupBackupTimer.unref === 'function') startupBackupTimer.unref();
+const backupInterval = setInterval(() => {
+  runBackup().catch(err => console.warn(`[kanban] WARNING: scheduled backup failed: ${err.message}`));
+}, BACKUP_INTERVAL_MS);
+if (typeof backupInterval.unref === 'function') backupInterval.unref();
+
+db.runBackup = runBackup;
+db.getBackupDir = () => BACKUP_DIR;
+db.getBackupRetention = () => BACKUP_RETENTION;
 
 module.exports = db;

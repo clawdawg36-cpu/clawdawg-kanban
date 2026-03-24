@@ -54,6 +54,11 @@ const PORT = 3456;
 const COL_LABELS = { 'idea': 'Idea', 'backlog': 'Backlog', 'in-progress': 'In Progress', 'in-review': 'In Review', 'done': 'Done' };
 const VALID_PRIORITIES = ['urgent', 'high', 'medium', 'low'];
 const VALID_COLUMNS = ['idea', 'backlog', 'in-progress', 'in-review', 'done'];
+const MAX_AGENT_LOG_MESSAGE_BYTES = 10 * 1024;
+const DEFAULT_TEMPLATE_SUBAGENTS_PATH_TOKEN = '{{KANBAN_SUBAGENTS_PATH}}';
+const DEFAULT_TEMPLATE_AGENT_PHONE_TOKEN = '{{KANBAN_AGENT_PHONE}}';
+const DEFAULT_TEMPLATE_SUBAGENTS_PATH = process.env.KANBAN_SUBAGENTS_PATH || DEFAULT_TEMPLATE_SUBAGENTS_PATH_TOKEN;
+const DEFAULT_TEMPLATE_AGENT_PHONE = process.env.KANBAN_AGENT_PHONE || DEFAULT_TEMPLATE_AGENT_PHONE_TOKEN;
 
 const intervalHandles = new Set();
 const activeRequests = new Set();
@@ -87,6 +92,59 @@ function waitForActiveRequestsToDrain(timeoutMs) {
 
 function generateAgentSessionId() {
   return crypto.randomBytes(16).toString('hex');
+}
+
+function getDefaultAgentTemplateDescription() {
+  return `Read ${DEFAULT_TEMPLATE_SUBAGENTS_PATH_TOKEN} first — it has everything you need: git workflow, notifications, kanban API, conflict avoidance, and ground rules.
+
+## Task
+
+[describe task here]
+
+## Git Workflow
+
+\`\`\`bash
+cd /path/to/repo
+git pull origin main
+git add -A
+git commit -m "feat|fix|chore: short description"
+gh auth switch --user clawdawg36-cpu
+git push
+gh auth switch --user mikejwhitehead
+\`\`\`
+
+## Notifications
+
+Send a BlueBubbles message to ${DEFAULT_TEMPLATE_AGENT_PHONE_TOKEN}:
+- START: "🔨 Starting: [task title]"
+- FINISH: "✅ Done: [task title]\\n[2-3 sentences on what changed]"
+- BLOCKER: "⚠️ Blocked: [task title]\\n[what you need and why]"`;
+}
+
+function resolveTemplatePlaceholders(value) {
+  if (typeof value !== 'string' || !value) return value;
+  return value
+    .split(DEFAULT_TEMPLATE_SUBAGENTS_PATH_TOKEN).join(DEFAULT_TEMPLATE_SUBAGENTS_PATH)
+    .split(DEFAULT_TEMPLATE_AGENT_PHONE_TOKEN).join(DEFAULT_TEMPLATE_AGENT_PHONE);
+}
+
+function parseProjectAgentConfig(project) {
+  if (!project?.agentConfig) return {};
+  try {
+    const parsed = typeof project.agentConfig === 'string'
+      ? JSON.parse(project.agentConfig)
+      : project.agentConfig;
+    return (parsed && typeof parsed === 'object') ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function getTaskLockExpiryIso(project) {
+  const agentConfig = parseProjectAgentConfig(project);
+  const timeoutSeconds = Number(agentConfig.timeoutSeconds);
+  const ttlSeconds = Number.isFinite(timeoutSeconds) && timeoutSeconds > 0 ? timeoutSeconds : 600;
+  return new Date(Date.now() + ttlSeconds * 1000).toISOString();
 }
 
 // ─── Security headers ─────────────────────────────────────────────────────────
@@ -368,6 +426,33 @@ async function validateWebhookUrl(rawUrl) {
   });
 }
 
+function getActorIp(req) {
+  const forwardedFor = req.headers['x-forwarded-for'];
+  if (typeof forwardedFor === 'string' && forwardedFor.trim()) {
+    return forwardedFor.split(',')[0].trim();
+  }
+  return req.ip || req.connection?.remoteAddress || null;
+}
+
+const insertAuditLogStmt = db.prepare(
+  'INSERT INTO audit_log (id, timestamp, action, actorIp, targetId, details) VALUES (?, ?, ?, ?, ?, ?)'
+);
+
+function writeAuditLog(req, action, targetId, details = null) {
+  try {
+    insertAuditLogStmt.run(
+      Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
+      new Date().toISOString(),
+      action,
+      getActorIp(req),
+      targetId || null,
+      details == null ? null : JSON.stringify(details)
+    );
+  } catch (err) {
+    console.error('Failed to write audit log:', err);
+  }
+}
+
 function fireWebhook(projectId, eventType, payload) {
   const hooks = db.prepare("SELECT * FROM webhooks WHERE projectId = ? AND (events = '[]' OR events LIKE ?)").all(projectId, `%"${eventType}"%`);
   for (const hook of hooks) {
@@ -441,7 +526,7 @@ app.post('/api/projects', (req, res) => {
     createdAt: new Date().toISOString(),
   };
   const tmplId = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
-  const newProjDefaultDesc = `Read /Users/mike/.openclaw/workspace/SUBAGENTS.md first — it has everything you need: git workflow, notifications, kanban API, conflict avoidance, and ground rules.\n\n## Task\n\n[describe task here]\n\n## Git Workflow\n\n\`\`\`bash\ncd /path/to/repo\ngit pull origin main\ngit add -A\ngit commit -m "feat|fix|chore: short description"\ngh auth switch --user clawdawg36-cpu\ngit push\ngh auth switch --user mikejwhitehead\n\`\`\`\n\n## Notifications\n\nSend a BlueBubbles message to +18183121807:\n- START: "🔨 Starting: [task title]"\n- FINISH: "✅ Done: [task title]\\n[2-3 sentences on what changed]"\n- BLOCKER: "⚠️ Blocked: [task title]\\n[what you need and why]"`;
+  const newProjDefaultDesc = getDefaultAgentTemplateDescription();
   const createProject = db.transaction(() => {
     db.prepare(
       'INSERT INTO projects (id, name, color, emoji, createdAt) VALUES (?, ?, ?, ?, ?)'
@@ -487,14 +572,47 @@ app.put('/api/projects/:id', (req, res) => {
   }
 });
 
+// GET /api/audit-log — list security-sensitive operations (read-only)
+app.get('/api/audit-log', (req, res) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit, 10) || 100, 500);
+    const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
+    const action = typeof req.query.action === 'string' && req.query.action.trim() ? req.query.action.trim() : null;
+
+    let rows;
+    if (action) {
+      rows = db.prepare('SELECT * FROM audit_log WHERE action = ? ORDER BY timestamp DESC LIMIT ? OFFSET ?').all(action, limit, offset);
+    } else {
+      rows = db.prepare('SELECT * FROM audit_log ORDER BY timestamp DESC LIMIT ? OFFSET ?').all(limit, offset);
+    }
+
+    res.json(rows.map((row) => ({
+      ...row,
+      details: row.details ? (() => {
+        try { return JSON.parse(row.details); } catch { return row.details; }
+      })() : null,
+    })));
+  } catch (err) {
+    console.error('GET /api/audit-log error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // DELETE /api/projects/:id — delete project and cascade tasks
 app.delete('/api/projects/:id', (req, res) => {
   try {
     if (req.params.id === 'default') return res.status(400).json({ error: 'Cannot delete default project' });
+    const projectId = req.params.id;
+    const existingProject = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId);
+    let deletedTaskCount = 0;
+    let deletedWebhookCount = 0;
+    let deletedTemplateCount = 0;
     const deleteProject = db.transaction(() => {
-      const projectId = req.params.id;
       // Get all task IDs for this project (needed for child-table cleanup)
       const taskIds = db.prepare("SELECT id FROM tasks WHERE projectId = ?").all(projectId).map(t => t.id);
+      deletedTaskCount = taskIds.length;
+      deletedWebhookCount = db.prepare('SELECT COUNT(*) AS cnt FROM webhooks WHERE projectId = ?').get(projectId).cnt;
+      deletedTemplateCount = db.prepare('SELECT COUNT(*) AS cnt FROM templates WHERE projectId = ?').get(projectId).cnt;
       if (taskIds.length > 0) {
         const placeholders = taskIds.map(() => '?').join(', ');
         // Cascade cleanup of child tables referencing task IDs
@@ -511,6 +629,12 @@ app.delete('/api/projects/:id', (req, res) => {
       db.prepare('DELETE FROM projects WHERE id = ?').run(projectId);
     });
     deleteProject();
+    writeAuditLog(req, 'project.delete', projectId, {
+      projectName: existingProject?.name || null,
+      deletedTaskCount,
+      deletedWebhookCount,
+      deletedTemplateCount,
+    });
     res.status(204).end();
   } catch (err) {
     console.error('DELETE /api/projects/:id error:', err);
@@ -661,30 +785,95 @@ app.get('/api/templates', (req, res) => {
   try {
     const projectId = req.query.projectId || 'default';
     const rows = db.prepare('SELECT * FROM templates WHERE projectId = ? ORDER BY createdAt ASC').all(projectId);
-    res.json(rows.map(r => ({ ...r, defaultTags: JSON.parse(r.defaultTags) })));
+    res.json(rows.map(r => ({
+      ...r,
+      defaultDescription: resolveTemplatePlaceholders(r.defaultDescription),
+      defaultTags: JSON.parse(r.defaultTags)
+    })));
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Internal server error" });
   }
 });
 
+function buildTemplatePayload(body = {}, existing = {}) {
+  const defaultPriority = body.defaultPriority !== undefined
+    ? body.defaultPriority
+    : (existing.defaultPriority || 'medium');
+
+  if (!VALID_PRIORITIES.includes(defaultPriority)) {
+    return { error: `Invalid priority. Must be one of: ${VALID_PRIORITIES.join(', ')}` };
+  }
+
+  let defaultTags = body.defaultTags !== undefined
+    ? body.defaultTags
+    : (existing.defaultTags || []);
+
+  if (typeof defaultTags === 'string') {
+    try {
+      defaultTags = JSON.parse(defaultTags);
+    } catch {
+      defaultTags = defaultTags.split(',').map(tag => tag.trim()).filter(Boolean);
+    }
+  }
+
+  if (!Array.isArray(defaultTags)) {
+    return { error: 'defaultTags must be an array of strings' };
+  }
+
+  return {
+    name: body.name !== undefined ? String(body.name).trim() || 'New Template' : (existing.name || 'New Template'),
+    defaultDescription: body.defaultDescription !== undefined ? String(body.defaultDescription) : (existing.defaultDescription || ''),
+    defaultTags: defaultTags.map(tag => String(tag).trim()).filter(Boolean),
+    defaultAssignee: body.defaultAssignee !== undefined ? String(body.defaultAssignee).trim() || 'Mike' : (existing.defaultAssignee || 'Mike'),
+    defaultPriority,
+  };
+}
+
 // POST /api/templates
 app.post('/api/templates', (req, res) => {
   try {
+    const payload = buildTemplatePayload(req.body);
+    if (payload.error) return res.status(400).json({ error: payload.error });
+
     const tmpl = {
       id: Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
       projectId: req.body.projectId || 'default',
-      name: req.body.name || 'New Template',
-      defaultDescription: req.body.defaultDescription || '',
-      defaultTags: req.body.defaultTags || [],
-      defaultAssignee: req.body.defaultAssignee || 'Mike',
-      defaultPriority: req.body.defaultPriority || 'medium',
+      ...payload,
       createdAt: new Date().toISOString(),
     };
     db.prepare(
       'INSERT INTO templates (id, projectId, name, defaultDescription, defaultTags, defaultAssignee, defaultPriority, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
     ).run(tmpl.id, tmpl.projectId, tmpl.name, tmpl.defaultDescription, JSON.stringify(tmpl.defaultTags), tmpl.defaultAssignee, tmpl.defaultPriority, tmpl.createdAt);
     res.status(201).json({ ...tmpl });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// PUT /api/templates/:id
+app.put('/api/templates/:id', (req, res) => {
+  try {
+    const existing = db.prepare('SELECT * FROM templates WHERE id = ?').get(req.params.id);
+    if (!existing) return res.status(404).json({ error: 'Not found' });
+
+    const payload = buildTemplatePayload(req.body, {
+      ...existing,
+      defaultTags: JSON.parse(existing.defaultTags || '[]'),
+    });
+    if (payload.error) return res.status(400).json({ error: payload.error });
+
+    db.prepare(
+      'UPDATE templates SET name = ?, defaultDescription = ?, defaultTags = ?, defaultAssignee = ?, defaultPriority = ? WHERE id = ?'
+    ).run(payload.name, payload.defaultDescription, JSON.stringify(payload.defaultTags), payload.defaultAssignee, payload.defaultPriority, req.params.id);
+
+    res.json({
+      id: existing.id,
+      projectId: existing.projectId,
+      createdAt: existing.createdAt,
+      ...payload,
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Internal server error" });
@@ -794,8 +983,9 @@ app.post('/api/tasks/:id/claim', (req, res) => {
     const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id);
     if (!task) return res.status(404).json({ error: 'Not found' });
 
+    const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(task.projectId || 'default');
     const now = new Date().toISOString();
-    const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+    const expiresAt = getTaskLockExpiryIso(project);
 
     // Atomic claim: only succeeds if task is unlocked or lock has expired
     const result = db.prepare(
@@ -1111,15 +1301,8 @@ app.post('/api/tasks/:id/spawn', async (req, res) => {
     }
 
     // Read project agentConfig for model/timeout overrides
-    // Note: agentConfig may be the JSON string "null" — always fall back to {}
     const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(task.projectId || 'default');
-    let agentConfig = {};
-    if (project && project.agentConfig) {
-      try {
-        const parsed = JSON.parse(project.agentConfig);
-        agentConfig = (parsed && typeof parsed === 'object') ? parsed : {};
-      } catch(e) { /* malformed JSON — keep default */ }
-    }
+    const agentConfig = parseProjectAgentConfig(project);
 
     // Read auth token from openclaw.json (gateway.auth.token)
     let authToken = process.env.OPENCLAW_TOKEN;
@@ -1142,7 +1325,7 @@ app.post('/api/tasks/:id/spawn', async (req, res) => {
       task.tags ? `\n## Tags\n${JSON.parse(task.tags || '[]').join(', ')}` : '',
     ].join('');
 
-    const taskPrompt = `Read /Users/mike/.openclaw/workspace/SUBAGENTS.md first.\n\n${taskDetails}`;
+    const taskPrompt = resolveTemplatePlaceholders(`Read ${DEFAULT_TEMPLATE_SUBAGENTS_PATH_TOKEN} first.\n\n${taskDetails}`);
 
     // Spawn via openclaw agent CLI as a detached background process.
     // The gateway uses WebSocket RPC (not HTTP REST) for session spawning, so we
@@ -1170,10 +1353,17 @@ app.post('/api/tasks/:id/spawn', async (req, res) => {
     child.unref();
 
     // Lock the card and store agent session ID
-    const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+    const expiresAt = getTaskLockExpiryIso(project);
     const nowIso = now.toISOString();
     db.prepare('UPDATE tasks SET lockedBy = ?, lockedAt = ?, lockExpiresAt = ?, agentSessionId = ?, agentStartedAt = ?, "column" = ? WHERE id = ?')
       .run(sessionKey, nowIso, expiresAt, sessionKey, nowIso, 'in-progress', task.id);
+
+    writeAuditLog(req, 'task.spawn', task.id, {
+      projectId: task.projectId || 'default',
+      sessionKey,
+      title: task.title,
+      model: agentConfig.model || null,
+    });
 
     res.json({ sessionKey, sessionId: sessionKey, taskId: task.id, status: 'spawned' });
   } catch (err) {
@@ -1231,17 +1421,31 @@ app.post('/api/tasks/:id/handoff', (req, res) => {
 // POST /api/tasks/:id/logs — append a log entry (called by agents)
 app.post('/api/tasks/:id/logs', (req, res) => {
   try {
-    const task = db.prepare('SELECT id FROM tasks WHERE id = ?').get(req.params.id);
+    const task = db.prepare('SELECT id, lockedBy, lockExpiresAt FROM tasks WHERE id = ?').get(req.params.id);
     if (!task) return res.status(404).json({ error: 'Not found' });
+
+    const agentSessionId = typeof req.body.agentSessionId === 'string' && req.body.agentSessionId.trim()
+      ? req.body.agentSessionId.trim()
+      : null;
+    const message = typeof req.body.message === 'string' ? req.body.message.trim() : '';
+    const now = new Date();
+    const hasActiveLock = Boolean(task.lockedBy && task.lockExpiresAt && new Date(task.lockExpiresAt) > now);
+
+    if (!message) return res.status(400).json({ error: 'message required' });
+    if (Buffer.byteLength(message, 'utf8') > MAX_AGENT_LOG_MESSAGE_BYTES) {
+      return res.status(413).json({ error: 'message too large', maxBytes: MAX_AGENT_LOG_MESSAGE_BYTES });
+    }
+    if (hasActiveLock && agentSessionId !== task.lockedBy) {
+      return res.status(403).json({ error: 'Only the lock owner can append logs while a task is locked' });
+    }
 
     const entry = {
       taskId: req.params.id,
-      agentSessionId: req.body.agentSessionId || null,
+      agentSessionId,
       level: ['info', 'warn', 'error'].includes(req.body.level) ? req.body.level : 'info',
-      message: (req.body.message || '').trim(),
-      timestamp: new Date().toISOString(),
+      message,
+      timestamp: now.toISOString(),
     };
-    if (!entry.message) return res.status(400).json({ error: 'message required' });
 
     const result = db.prepare(
       'INSERT INTO agent_logs (taskId, agentSessionId, level, message, timestamp) VALUES (?, ?, ?, ?, ?)'
@@ -1292,10 +1496,17 @@ app.get('/api/tasks/:id/logs', (req, res) => {
 // Delete task
 app.delete('/api/tasks/:id', (req, res) => {
   try {
-    const existing = db.prepare('SELECT id, projectId FROM tasks WHERE id = ?').get(req.params.id);
+    const existing = db.prepare('SELECT id, title, projectId, assignee, priority, "column" FROM tasks WHERE id = ?').get(req.params.id);
     if (!existing) return res.status(404).json({ error: 'Not found' });
 
     db.prepare('DELETE FROM tasks WHERE id = ?').run(req.params.id);
+    writeAuditLog(req, 'task.delete', req.params.id, {
+      projectId: existing.projectId || 'default',
+      title: existing.title,
+      assignee: existing.assignee,
+      priority: existing.priority,
+      column: existing.column,
+    });
     sseBroadcast(existing.projectId || 'default', 'task.deleted', { taskId: req.params.id });
     res.status(204).end();
   } catch (err) {
@@ -1694,6 +1905,12 @@ app.post('/api/webhooks', async (req, res) => {
     if (urlError) return res.status(400).json({ error: urlError });
     db.prepare('INSERT INTO webhooks (id, projectId, url, events, secret, createdAt) VALUES (?, ?, ?, ?, ?, ?)')
       .run(hook.id, hook.projectId, hook.url, JSON.stringify(hook.events), hook.secret, hook.createdAt);
+    writeAuditLog(req, 'webhook.create', hook.id, {
+      projectId: hook.projectId,
+      url: hook.url,
+      events: hook.events,
+      secretGenerated: !req.body.secret,
+    });
     // Return the plaintext secret ONCE on creation — caller must store it securely
     res.status(201).json({
       id: hook.id,
@@ -1737,6 +1954,11 @@ app.post('/api/webhooks/:id/rotate-secret', (req, res) => {
     const newPlaintext = generateWebhookSecret();
     const newEncrypted = encryptWebhookSecret(newPlaintext);
     db.prepare('UPDATE webhooks SET secret = ? WHERE id = ?').run(newEncrypted, req.params.id);
+    writeAuditLog(req, 'webhook.rotate-secret', req.params.id, {
+      projectId: row.projectId,
+      url: row.url,
+      events: JSON.parse(row.events || '[]'),
+    });
     res.json({
       id: row.id,
       secret: newPlaintext,          // plaintext returned ONCE — store securely
@@ -1807,30 +2029,25 @@ app.get('/api/stats', (req, res) => {
 
 // ─── Startup: seed default 'agent-task' template for projects that have none ──
 (function seedDefaultTemplates() {
-  const DEFAULT_DESCRIPTION = `Read /Users/mike/.openclaw/workspace/SUBAGENTS.md first — it has everything you need: git workflow, notifications, kanban API, conflict avoidance, and ground rules.
-
-## Task
-
-[describe task here]
-
-## Git Workflow
-
-\`\`\`bash
-cd /path/to/repo
-git pull origin main
-git add -A
-git commit -m "feat|fix|chore: short description"
-gh auth switch --user clawdawg36-cpu
-git push
-gh auth switch --user mikejwhitehead
-\`\`\`
-
-## Notifications
-
-Send a BlueBubbles message to +18183121807:
-- START: "🔨 Starting: [task title]"
-- FINISH: "✅ Done: [task title]\\n[2-3 sentences on what changed]"
-- BLOCKER: "⚠️ Blocked: [task title]\\n[what you need and why]"`;
+  const DEFAULT_DESCRIPTION = getDefaultAgentTemplateDescription();
+  const legacySubagentsPath = '/Users/mike/.openclaw/workspace/SUBAGENTS.md';
+  const legacyAgentPhone = '+18183121807';
+  db.prepare(
+    `UPDATE templates
+     SET defaultDescription = replace(
+       replace(defaultDescription, ?, ?),
+       ?, ?
+     )
+     WHERE defaultDescription LIKE '%' || ? || '%'
+        OR defaultDescription LIKE '%' || ? || '%'`
+  ).run(
+    legacySubagentsPath,
+    DEFAULT_TEMPLATE_SUBAGENTS_PATH_TOKEN,
+    legacyAgentPhone,
+    DEFAULT_TEMPLATE_AGENT_PHONE_TOKEN,
+    legacySubagentsPath,
+    legacyAgentPhone
+  );
 
   const projects = db.prepare('SELECT id FROM projects').all();
   for (const project of projects) {
