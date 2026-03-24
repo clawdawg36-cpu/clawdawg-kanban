@@ -103,6 +103,14 @@ if (!cols.includes('handoffLog')) {
   db.exec("ALTER TABLE tasks ADD COLUMN handoffLog TEXT DEFAULT '[]'");
   console.log('Migrated: added handoffLog column to tasks table');
 }
+if (!cols.includes('agentSessionId')) {
+  db.exec('ALTER TABLE tasks ADD COLUMN agentSessionId TEXT DEFAULT NULL');
+  console.log('Migrated: added agentSessionId column to tasks table');
+}
+if (!cols.includes('agentStartedAt')) {
+  db.exec('ALTER TABLE tasks ADD COLUMN agentStartedAt TEXT DEFAULT NULL');
+  console.log('Migrated: added agentStartedAt column to tasks table');
+}
 
 // Ensure default project exists and assign orphaned tasks to it
 const defaultProject = db.prepare("SELECT id FROM projects WHERE id = 'default'").get();

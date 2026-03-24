@@ -177,6 +177,14 @@ app.get('/api/tasks', (req, res) => {
     blockedBy: row.blockedBy ? JSON.parse(row.blockedBy) : [],
     blocked: deps.some(d => d.blocked_id === row.id && !doneIds.has(d.blocker_id)),
     handoffLog: row.handoffLog ? JSON.parse(row.handoffLog) : [],
+    agentStatus: (() => {
+      if (row.column === 'done') return 'done';
+      if (!row.lockedBy) return 'idle';
+      const now = new Date();
+      const expires = row.lockExpiresAt ? new Date(row.lockExpiresAt) : null;
+      if (expires && expires < now) return 'idle'; // lock expired
+      return row.column === 'in-progress' ? 'in-progress' : 'claimed';
+    })(),
   })));
 });
 
@@ -197,8 +205,8 @@ app.post('/api/tasks/:id/claim', (req, res) => {
   const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
   const agentSessionId = req.body.agentSessionId;
 
-  db.prepare('UPDATE tasks SET lockedBy = ?, lockedAt = ?, lockExpiresAt = ? WHERE id = ?')
-    .run(agentSessionId, now, expiresAt, req.params.id);
+  db.prepare('UPDATE tasks SET lockedBy = ?, lockedAt = ?, lockExpiresAt = ?, agentSessionId = ?, agentStartedAt = ? WHERE id = ?')
+    .run(agentSessionId, now, expiresAt, agentSessionId, now, req.params.id);
 
   const updated = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id);
   res.json({ ...updated, tags: JSON.parse(updated.tags), subtasks: updated.subtasks ? JSON.parse(updated.subtasks) : null });
@@ -281,9 +289,13 @@ app.put('/api/tasks/:id', (req, res) => {
   // Handle wave field explicitly
   updated.wave = req.body.wave !== undefined ? req.body.wave : (existing.wave !== undefined ? existing.wave : null);
 
+  // Handle agentSessionId and agentStartedAt
+  updated.agentSessionId = req.body.agentSessionId !== undefined ? req.body.agentSessionId || null : (existing.agentSessionId || null);
+  updated.agentStartedAt = req.body.agentStartedAt !== undefined ? req.body.agentStartedAt || null : (existing.agentStartedAt || null);
+
   db.prepare(
-    'UPDATE tasks SET title = ?, description = ?, assignee = ?, priority = ?, tags = ?, "column" = ?, dueDate = ?, recurring = ?, subtasks = ?, projectId = ?, blockedBy = ?, wave = ? WHERE id = ?'
-  ).run(updated.title, updated.description, updated.assignee, updated.priority, JSON.stringify(updated.tags), updated.column, updated.dueDate || null, updated.recurring || null, updated.subtasks ? JSON.stringify(updated.subtasks) : null, updated.projectId || 'default', JSON.stringify(updated.blockedBy), updated.wave, updated.id);
+    'UPDATE tasks SET title = ?, description = ?, assignee = ?, priority = ?, tags = ?, "column" = ?, dueDate = ?, recurring = ?, subtasks = ?, projectId = ?, blockedBy = ?, wave = ?, agentSessionId = ?, agentStartedAt = ? WHERE id = ?'
+  ).run(updated.title, updated.description, updated.assignee, updated.priority, JSON.stringify(updated.tags), updated.column, updated.dueDate || null, updated.recurring || null, updated.subtasks ? JSON.stringify(updated.subtasks) : null, updated.projectId || 'default', JSON.stringify(updated.blockedBy), updated.wave, updated.agentSessionId, updated.agentStartedAt, updated.id);
 
   // Auto-log column changes
   if (req.body.column && req.body.column !== existing.column) {
@@ -370,6 +382,14 @@ app.get('/api/tasks/:id', (req, res) => {
     blockedBy: task.blockedBy ? JSON.parse(task.blockedBy) : [],
     blocked: activeBlockers.length > 0,
     handoffLog: task.handoffLog ? JSON.parse(task.handoffLog) : [],
+    agentStatus: (() => {
+      if (task.column === 'done') return 'done';
+      if (!task.lockedBy) return 'idle';
+      const now = new Date();
+      const expires = task.lockExpiresAt ? new Date(task.lockExpiresAt) : null;
+      if (expires && expires < now) return 'idle'; // lock expired
+      return task.column === 'in-progress' ? 'in-progress' : 'claimed';
+    })(),
   });
 });
 
