@@ -3200,8 +3200,6 @@ function matchesSearch(t) {
   }
   if (filterPriority && t.priority !== filterPriority) return false;
   if (filterAssignee && t.assignee !== filterAssignee) return false;
-  // header-level assignee filter
-  if (activeFilter !== 'all' && t.assignee !== activeFilter) return false;
   return true;
 }
 
@@ -5081,7 +5079,13 @@ function editProject(id) {
 async function deleteProject(id) {
   if (id === 'default') return;
   const project = projects.find(p => p.id === id);
-  if (!confirm(`Delete project "${project ? project.name : id}" and all its tasks?`)) return;
+  const projectName = project ? project.name : id;
+  const confirmed = await confirmModal(
+    `Delete "${projectName}"?`,
+    `This will permanently delete the project and all its tasks. This cannot be undone.`,
+    'Delete Project'
+  );
+  if (!confirmed) return;
   try {
     const res = await fetch(`/api/projects/${id}`, { method: 'DELETE' });
     if (!res.ok) throw new Error(`Server error: ${res.status}`);
