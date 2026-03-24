@@ -3366,6 +3366,33 @@ kbd {
       </div>
     </div>
     <div class="field">
+      <label>🧩 Templates</label>
+      <div id="projectTemplateEmptyState" style="display:none;font-size:12px;color:var(--text-dim);font-style:italic;margin-bottom:8px;">Save the project first to manage templates.</div>
+      <div id="projectTemplateList" style="margin-bottom:10px;display:flex;flex-direction:column;gap:8px"></div>
+      <div id="projectTemplateEditor" style="display:flex;flex-direction:column;gap:8px;padding:10px;border:1px solid var(--border);border-radius:10px;background:var(--surface2);">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+          <strong id="projectTemplateEditorTitle" style="font-size:12px;">New template</strong>
+          <button type="button" onclick="resetProjectTemplateForm()" style="padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--text-dim);font-family:inherit;font-size:11px;cursor:pointer;">Clear</button>
+        </div>
+        <input type="hidden" id="projectTemplateEditId">
+        <input type="text" id="projectTemplateName" placeholder="Template name" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-family:inherit;font-size:12px;outline:none;">
+        <textarea id="projectTemplateDescription" placeholder="Default description" rows="3" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-family:inherit;font-size:12px;outline:none;resize:vertical;"></textarea>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <input type="text" id="projectTemplateTags" placeholder="Tags (comma-separated)" style="flex:1 1 220px;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-family:inherit;font-size:12px;outline:none;">
+          <input type="text" id="projectTemplateAssignee" placeholder="Assignee" style="flex:1 1 160px;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-family:inherit;font-size:12px;outline:none;">
+          <select id="projectTemplatePriority" style="flex:0 0 140px;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-family:inherit;font-size:12px;outline:none;">
+            <option value="urgent">Urgent</option>
+            <option value="high">High</option>
+            <option value="medium" selected>Medium</option>
+            <option value="low">Low</option>
+          </select>
+        </div>
+        <div style="display:flex;justify-content:flex-end;gap:8px;">
+          <button type="button" onclick="saveProjectTemplate()" style="padding:8px 12px;border-radius:8px;border:1px solid var(--accent);background:var(--accent-glow);color:#a29bfe;font-family:inherit;font-size:12px;font-weight:600;cursor:pointer;">Save Template</button>
+        </div>
+      </div>
+    </div>
+    <div class="field">
       <label>🔔 Webhooks</label>
       <div id="webhookList" style="margin-bottom:8px;display:flex;flex-direction:column;gap:6px"></div>
       <div style="display:flex;gap:8px">
@@ -5825,6 +5852,9 @@ function openProjectModal(project) {
   modal.classList.add('open');
   setTimeout(() => document.getElementById('pName').focus(), 100);
 
+  const projectId = project ? project.id : null;
+  loadProjectTemplates(projectId);
+
   // Load webhooks for this project
   loadWebhooks(project ? project.id : activeProjectId);
 }
@@ -5834,6 +5864,158 @@ function closeProjectModal() {
 }
 
 let currentWebhooks = [];
+let currentProjectTemplates = [];
+let currentProjectTemplateProjectId = null;
+
+function getProjectTemplateTagsFromInput() {
+  return document.getElementById('projectTemplateTags').value
+    .split(',')
+    .map(tag => tag.trim())
+    .filter(Boolean);
+}
+
+function resetProjectTemplateForm() {
+  document.getElementById('projectTemplateEditId').value = '';
+  document.getElementById('projectTemplateEditorTitle').textContent = 'New template';
+  document.getElementById('projectTemplateName').value = '';
+  document.getElementById('projectTemplateDescription').value = '';
+  document.getElementById('projectTemplateTags').value = '';
+  document.getElementById('projectTemplateAssignee').value = 'Mike';
+  document.getElementById('projectTemplatePriority').value = 'medium';
+}
+
+function renderProjectTemplateList() {
+  const list = document.getElementById('projectTemplateList');
+  if (!list) return;
+
+  if (!currentProjectTemplateProjectId) {
+    list.innerHTML = '';
+    return;
+  }
+
+  if (!currentProjectTemplates.length) {
+    list.innerHTML = '<div style="font-size:12px;color:var(--text-dim);font-style:italic">No templates yet.</div>';
+    return;
+  }
+
+  list.innerHTML = currentProjectTemplates.map(t => `
+    <div style="display:flex;flex-direction:column;gap:8px;padding:10px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
+        <div style="min-width:0;flex:1;">
+          <div style="font-size:13px;font-weight:600;word-break:break-word;">${esc(t.name || 'Untitled template')}</div>
+          <div style="font-size:11px;color:var(--text-dim);margin-top:3px;">${esc((t.defaultAssignee || 'Mike'))} · ${esc((t.defaultPriority || 'medium'))}</div>
+        </div>
+        <div style="display:flex;gap:6px;flex-shrink:0;">
+          <button type="button" onclick="editProjectTemplate('${t.id}')" style="padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--text);font-family:inherit;font-size:11px;cursor:pointer;">Edit</button>
+          <button type="button" onclick="deleteProjectTemplate('${t.id}')" style="padding:6px 10px;border-radius:8px;border:1px solid rgba(255,107,107,.35);background:rgba(255,107,107,.08);color:#ff8b8b;font-family:inherit;font-size:11px;cursor:pointer;">Delete</button>
+        </div>
+      </div>
+      ${t.defaultDescription ? `<div style="font-size:12px;color:var(--text-dim);white-space:pre-wrap;word-break:break-word;">${esc(t.defaultDescription)}</div>` : ''}
+      ${(t.defaultTags || []).length ? `<div style="display:flex;flex-wrap:wrap;gap:6px;">${t.defaultTags.map(tag => `<span style="padding:3px 8px;border-radius:999px;background:var(--surface);border:1px solid var(--border);font-size:11px;color:var(--text-dim);">${esc(tag)}</span>`).join('')}</div>` : ''}
+    </div>
+  `).join('');
+}
+
+async function loadProjectTemplates(projectId) {
+  currentProjectTemplateProjectId = projectId || null;
+  const emptyState = document.getElementById('projectTemplateEmptyState');
+  const editor = document.getElementById('projectTemplateEditor');
+  if (!projectId) {
+    currentProjectTemplates = [];
+    emptyState.style.display = '';
+    editor.style.display = 'none';
+    renderProjectTemplateList();
+    resetProjectTemplateForm();
+    return;
+  }
+
+  emptyState.style.display = 'none';
+  editor.style.display = 'flex';
+
+  try {
+    const res = await fetch(`/api/templates?projectId=${encodeURIComponent(projectId)}`);
+    if (!res.ok) throw new Error(`Server error: ${res.status}`);
+    currentProjectTemplates = await res.json();
+    renderProjectTemplateList();
+    resetProjectTemplateForm();
+  } catch (e) {
+    currentProjectTemplates = [];
+    renderProjectTemplateList();
+    showToast('Failed to load templates: ' + e.message, 'error');
+  }
+}
+
+function editProjectTemplate(id) {
+  const tmpl = currentProjectTemplates.find(t => t.id === id);
+  if (!tmpl) return;
+  document.getElementById('projectTemplateEditId').value = tmpl.id;
+  document.getElementById('projectTemplateEditorTitle').textContent = 'Edit template';
+  document.getElementById('projectTemplateName').value = tmpl.name || '';
+  document.getElementById('projectTemplateDescription').value = tmpl.defaultDescription || '';
+  document.getElementById('projectTemplateTags').value = (tmpl.defaultTags || []).join(', ');
+  document.getElementById('projectTemplateAssignee').value = tmpl.defaultAssignee || 'Mike';
+  document.getElementById('projectTemplatePriority').value = tmpl.defaultPriority || 'medium';
+  document.getElementById('projectTemplateName').focus();
+}
+
+async function saveProjectTemplate() {
+  const projectId = currentProjectTemplateProjectId;
+  if (!projectId) {
+    showToast('Save the project first, then add templates.', 'error');
+    return;
+  }
+
+  const id = document.getElementById('projectTemplateEditId').value;
+  const name = document.getElementById('projectTemplateName').value.trim();
+  if (!name) {
+    document.getElementById('projectTemplateName').focus();
+    return;
+  }
+
+  const payload = {
+    projectId,
+    name,
+    defaultDescription: document.getElementById('projectTemplateDescription').value,
+    defaultTags: getProjectTemplateTagsFromInput(),
+    defaultAssignee: document.getElementById('projectTemplateAssignee').value.trim() || 'Mike',
+    defaultPriority: document.getElementById('projectTemplatePriority').value || 'medium',
+  };
+
+  try {
+    const res = await fetch(id ? `/api/templates/${id}` : '/api/templates', {
+      method: id ? 'PUT' : 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const error = await res.json().catch(() => null);
+      throw new Error(error?.error || `Server error: ${res.status}`);
+    }
+    await loadProjectTemplates(projectId);
+  } catch (e) {
+    showToast('Failed to save template: ' + e.message, 'error');
+  }
+}
+
+async function deleteProjectTemplate(id) {
+  const tmpl = currentProjectTemplates.find(t => t.id === id);
+  const confirmed = await confirmModal(
+    `Delete "${tmpl?.name || 'template'}"?`,
+    'This removes the template but does not affect existing tasks.',
+    'Delete Template'
+  );
+  if (!confirmed) return;
+
+  try {
+    const res = await fetch(`/api/templates/${id}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error(`Server error: ${res.status}`);
+    currentProjectTemplates = currentProjectTemplates.filter(t => t.id !== id);
+    renderProjectTemplateList();
+    if (document.getElementById('projectTemplateEditId').value === id) resetProjectTemplateForm();
+  } catch (e) {
+    showToast('Failed to delete template: ' + e.message, 'error');
+  }
+}
 
 async function loadWebhooks(projectId) {
   try {
