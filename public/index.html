@@ -1212,6 +1212,12 @@ input[type="date"] {
   box-shadow: 0 0 0 3px var(--accent-glow);
 }
 
+.search-select.active {
+  border-color: var(--accent);
+  background-color: var(--accent-glow);
+  color: #a29bfe;
+}
+
 .search-results-info {
   font-size: 12px;
   color: var(--text-dim);
@@ -3105,7 +3111,6 @@ function confirmModal(title, message, confirmLabel = 'Delete') {
 
 let tasks = [];
 let dependencies = []; // [{blocker_id, blocked_id}]
-let activeFilter = 'all';
 let activeMobileCol = 'backlog';
 const isMobile = () => window.matchMedia('(max-width: 768px)').matches;
 const COL_ORDER = ['idea', 'backlog', 'in-progress', 'in-review', 'done'];
@@ -3616,6 +3621,7 @@ document.querySelectorAll('.card-list').forEach(list => {
   if (filterAssigneeEl) {
     filterAssigneeEl.addEventListener('change', () => {
       filterAssignee = filterAssigneeEl.value;
+      filterAssigneeEl.classList.toggle('active', !!filterAssignee);
       render();
     });
   }
@@ -3632,11 +3638,7 @@ function resetSearch() {
   const fp = document.getElementById('filterPriority');
   if (fp) fp.value = '';
   const fa = document.getElementById('filterAssignee');
-  if (fa) fa.value = '';
-  activeFilter = 'all';
-  document.querySelectorAll('.filter-btn').forEach(b => {
-    b.classList.toggle('active', b.dataset.filter === 'all');
-  });
+  if (fa) { fa.value = ''; fa.classList.remove('active'); }
   render();
 }
 
@@ -4178,6 +4180,11 @@ async function deleteTask(id, e) {
   const btn = e ? e.currentTarget || e.target : null;
   if (btn) {
     const confirmed = await confirmInline(btn);
+    if (!confirmed) return;
+  } else {
+    // Keyboard shortcut path — use modal fallback
+    const task = tasks.find(t => t.id === id);
+    const confirmed = await confirmModal('Delete task?', `Delete "${task ? task.title : id}"? This cannot be undone.`);
     if (!confirmed) return;
   }
   try {
