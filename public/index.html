@@ -3561,6 +3561,20 @@ function populateWaveSelect() {
     waves.map(w => `<option value="${w}" ${filterWave == w ? 'selected' : ''}>Wave ${w}</option>`).join('');
 }
 
+function populateAssigneeSelect() {
+  const el = document.getElementById('filterAssignee');
+  if (!el) return;
+  const currentValue = el.value;
+  const assignees = [...new Set(tasks.map(t => t.assignee).filter(a => a))].sort();
+  el.innerHTML = '<option value="">All</option>' +
+    assignees.map(a => `<option value="${a}" ${currentValue === a ? 'selected' : ''}>${a}</option>`).join('');
+  if (currentValue && !assignees.includes(currentValue)) {
+    filterAssignee = '';
+    el.value = '';
+    el.classList.remove('active');
+  }
+}
+
 async function loadTasks() {
   showBoardLoading();
   try {
@@ -3574,6 +3588,7 @@ async function loadTasks() {
     hideBoardLoading();
     hideBoardError();
     populateWaveSelect();
+    populateAssigneeSelect();
     render();
     // Update sidebar count for active project
     projectTaskCounts[activeProjectId] = tasks.length;
@@ -4457,7 +4472,15 @@ function trapFocus(container) {
   _focusTrapTrigger = document.activeElement;
 
   const getFocusable = () => Array.from(container.querySelectorAll(FOCUSABLE_SELECTORS))
-    .filter(el => !el.closest('[style*="display: none"]') && !el.closest('[hidden]'));
+    .filter(el => {
+      // Exclude elements that are hidden via offsetParent, computed style, or aria-hidden
+      if (el.offsetParent === null) return false;
+      if (getComputedStyle(el).display === 'none') return false;
+      if (getComputedStyle(el).visibility === 'hidden') return false;
+      if (el.closest('[aria-hidden="true"]')) return false;
+      if (el.closest('[hidden]')) return false;
+      return true;
+    });
 
   // Move focus to the first focusable element
   const focusable = getFocusable();
