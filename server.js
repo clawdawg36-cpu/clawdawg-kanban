@@ -979,11 +979,26 @@ app.get('/api/tasks', (req, res) => {
     // Tags are stored as JSON arrays; use exact Array.includes() match.
     const filterTag = req.query.tag !== undefined ? req.query.tag : null;
 
+    // ?search=<text> — server-side full-text search across title, description, and assignee.
+    // Escapes LIKE special chars (%, _, \) to prevent injection.
+    const searchRaw = req.query.search !== undefined ? req.query.search : null;
+    let searchClause = '';
+    let searchParams = [];
+    if (searchRaw !== null && searchRaw.trim() !== '') {
+      const escaped = searchRaw
+        .replace(/\\/g, '\\\\')
+        .replace(/%/g, '\\%')
+        .replace(/_/g, '\\_');
+      const pattern = `%${escaped}%`;
+      searchClause = ` AND (title LIKE ? ESCAPE '\\' OR description LIKE ? ESCAPE '\\' OR assignee LIKE ? ESCAPE '\\')`;
+      searchParams = [pattern, pattern, pattern];
+    }
+
     let rows;
     let total;
     if (filterTag !== null) {
       // Tag filter requires in-JS processing; paginate after filtering.
-      const allRows = db.prepare("SELECT * FROM tasks WHERE projectId = ?").all(projectId);
+      const allRows = db.prepare(`SELECT * FROM tasks WHERE projectId = ?${searchClause}`).all(projectId, ...searchParams);
       const filteredRows = allRows.filter(row => {
         try {
           return JSON.parse(row.tags || '[]').includes(filterTag);
@@ -994,8 +1009,8 @@ app.get('/api/tasks', (req, res) => {
       total = filteredRows.length;
       rows = filteredRows.slice(offset, offset + limit);
     } else {
-      total = db.prepare("SELECT COUNT(*) AS cnt FROM tasks WHERE projectId = ?").get(projectId).cnt;
-      rows = db.prepare("SELECT * FROM tasks WHERE projectId = ? LIMIT ? OFFSET ?").all(projectId, limit, offset);
+      total = db.prepare(`SELECT COUNT(*) AS cnt FROM tasks WHERE projectId = ?${searchClause}`).get(projectId, ...searchParams).cnt;
+      rows = db.prepare(`SELECT * FROM tasks WHERE projectId = ?${searchClause} LIMIT ? OFFSET ?`).all(projectId, ...searchParams, limit, offset);
     }
 
     // Compute blocked status against the full project's done set, not just this page.
