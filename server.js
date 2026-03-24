@@ -165,7 +165,9 @@ function fireWebhook(projectId, eventType, payload) {
   const hooks = db.prepare("SELECT * FROM webhooks WHERE projectId = ? AND (events = '[]' OR events LIKE ?)").all(projectId, `%"${eventType}"%`);
   for (const hook of hooks) {
     const body = JSON.stringify({ event: eventType, timestamp: new Date().toISOString(), ...payload });
-    const sig = hook.secret ? 'sha256=' + crypto.createHmac('sha256', hook.secret).update(body).digest('hex') : null;
+    // Decrypt the stored secret before using it for HMAC signing
+    const signingKey = decryptWebhookSecret(hook.secret);
+    const sig = signingKey ? 'sha256=' + crypto.createHmac('sha256', signingKey).update(body).digest('hex') : null;
     try {
       const url = new URL(hook.url);
       // Only fire over https (skip any http hooks that may have been stored before this fix)
@@ -197,22 +199,33 @@ function fireWebhook(projectId, eventType, payload) {
 
 // GET /api/projects — list all projects
 app.get('/api/projects', (req, res) => {
-  const rows = db.prepare('SELECT * FROM projects ORDER BY createdAt ASC').all();
-  res.json(rows.map(r => ({
-    ...r,
-    agentConfig: r.agentConfig ? JSON.parse(r.agentConfig) : null
-  })));
+  try {
+    const rows = db.prepare('SELECT * FROM projects ORDER BY createdAt ASC').all();
+    res.json(rows.map(r => ({
+      ...r,
+      agentConfig: r.agentConfig ? JSON.parse(r.agentConfig) : null
+    })));
+  } catch (err) {
+    console.error('GET /api/projects error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
 // GET /api/projects/:id — single project
 app.get('/api/projects/:id', (req, res) => {
-  const row = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id);
-  if (!row) return res.status(404).json({ error: 'Not found' });
-  res.json({ ...row, agentConfig: row.agentConfig ? JSON.parse(row.agentConfig) : null });
+  try {
+    const row = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id);
+    if (!row) return res.status(404).json({ error: 'Not found' });
+    res.json({ ...row, agentConfig: row.agentConfig ? JSON.parse(row.agentConfig) : null });
+  } catch (err) {
+    console.error('GET /api/projects/:id error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
 // POST /api/projects — create a project
 app.post('/api/projects', (req, res) => {
+  try {
   const project = {
     id: Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
     name: req.body.name || 'New Project',
@@ -235,29 +248,43 @@ app.post('/api/projects', (req, res) => {
     'ClawDawg', 'medium', new Date().toISOString()
   );
   res.status(201).json(project);
+  } catch (err) {
+    console.error('POST /api/projects error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
 // PUT /api/projects/:id — update a project
 app.put('/api/projects/:id', (req, res) => {
-  const existing = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id);
-  if (!existing) return res.status(404).json({ error: 'Not found' });
-  const updated = {
-    name: req.body.name !== undefined ? req.body.name : existing.name,
-    color: req.body.color !== undefined ? req.body.color : existing.color,
-    emoji: req.body.emoji !== undefined ? req.body.emoji : existing.emoji,
-    agentConfig: req.body.agentConfig !== undefined ? JSON.stringify(req.body.agentConfig) : existing.agentConfig,
-  };
-  db.prepare('UPDATE projects SET name = ?, color = ?, emoji = ?, agentConfig = ? WHERE id = ?')
-    .run(updated.name, updated.color, updated.emoji, updated.agentConfig, req.params.id);
-  res.json({ ...existing, ...updated, agentConfig: updated.agentConfig ? JSON.parse(updated.agentConfig) : null });
+  try {
+    const existing = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id);
+    if (!existing) return res.status(404).json({ error: 'Not found' });
+    const updated = {
+      name: req.body.name !== undefined ? req.body.name : existing.name,
+      color: req.body.color !== undefined ? req.body.color : existing.color,
+      emoji: req.body.emoji !== undefined ? req.body.emoji : existing.emoji,
+      agentConfig: req.body.agentConfig !== undefined ? JSON.stringify(req.body.agentConfig) : existing.agentConfig,
+    };
+    db.prepare('UPDATE projects SET name = ?, color = ?, emoji = ?, agentConfig = ? WHERE id = ?')
+      .run(updated.name, updated.color, updated.emoji, updated.agentConfig, req.params.id);
+    res.json({ ...existing, ...updated, agentConfig: updated.agentConfig ? JSON.parse(updated.agentConfig) : null });
+  } catch (err) {
+    console.error('PUT /api/projects/:id error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
 // DELETE /api/projects/:id — delete project and cascade tasks
 app.delete('/api/projects/:id', (req, res) => {
-  if (req.params.id === 'default') return res.status(400).json({ error: 'Cannot delete default project' });
-  db.prepare("DELETE FROM tasks WHERE projectId = ?").run(req.params.id);
-  db.prepare('DELETE FROM projects WHERE id = ?').run(req.params.id);
-  res.status(204).end();
+  try {
+    if (req.params.id === 'default') return res.status(400).json({ error: 'Cannot delete default project' });
+    db.prepare("DELETE FROM tasks WHERE projectId = ?").run(req.params.id);
+    db.prepare('DELETE FROM projects WHERE id = ?').run(req.params.id);
+    res.status(204).end();
+  } catch (err) {
+    console.error('DELETE /api/projects/:id error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
 // ─── Templates ───────────────────────────────────────────────────────────────
@@ -313,11 +340,7 @@ app.delete('/api/templates/:id', (req, res) => {
 // Get all tasks (optionally filtered by projectId)
 app.get('/api/tasks', (req, res) => {
   const projectId = req.query.projectId || 'default';
-  // Auto-expire stale locks before returning results
-  db.prepare(`
-    UPDATE tasks SET lockedBy = NULL, lockedAt = NULL, lockExpiresAt = NULL
-    WHERE lockExpiresAt IS NOT NULL AND lockExpiresAt < datetime('now')
-  `).run();
+  // Lock expiry is handled by background cleanup (see setInterval below) — no UPDATE here
   const rows = db.prepare("SELECT * FROM tasks WHERE projectId = ?").all(projectId);
   // Compute blocked status for each task
   const doneIds = new Set(rows.filter(r => r.column === 'done').map(r => r.id));
@@ -403,45 +426,51 @@ app.post('/api/tasks/:id/release', (req, res) => {
 
 // Create task
 app.post('/api/tasks', (req, res) => {
-  const blockedByArr = Array.isArray(req.body.blockedBy) ? req.body.blockedBy : [];
-  const task = {
-    id: Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
-    title: req.body.title || 'Untitled',
-    description: req.body.description || '',
-    assignee: req.body.assignee || 'Mike',
-    priority: req.body.priority || 'medium',
-    tags: req.body.tags || [],
-    column: req.body.column || 'backlog',
-    createdAt: new Date().toISOString(),
-    recurring: req.body.recurring || null,
-    subtasks: req.body.subtasks || null,
-    projectId: req.body.projectId || 'default',
-    wave: req.body.wave !== undefined ? req.body.wave : null,
-    blockedBy: blockedByArr,
-  };
-  db.prepare(
-    'INSERT INTO tasks (id, title, description, assignee, priority, tags, "column", createdAt, recurring, subtasks, projectId, wave, blockedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-  ).run(task.id, task.title, task.description, task.assignee, task.priority, JSON.stringify(task.tags), task.column, task.createdAt, task.recurring, task.subtasks ? JSON.stringify(task.subtasks) : null, task.projectId, task.wave, JSON.stringify(blockedByArr));
+  try {
+    const blockedByArr = Array.isArray(req.body.blockedBy) ? req.body.blockedBy : [];
+    const task = {
+      id: Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
+      title: req.body.title || 'Untitled',
+      description: req.body.description || '',
+      assignee: req.body.assignee || 'Mike',
+      priority: req.body.priority || 'medium',
+      tags: req.body.tags || [],
+      column: req.body.column || 'backlog',
+      createdAt: new Date().toISOString(),
+      recurring: req.body.recurring || null,
+      subtasks: req.body.subtasks || null,
+      projectId: req.body.projectId || 'default',
+      wave: req.body.wave !== undefined ? req.body.wave : null,
+      blockedBy: blockedByArr,
+    };
+    db.prepare(
+      'INSERT INTO tasks (id, title, description, assignee, priority, tags, "column", createdAt, recurring, subtasks, projectId, wave, blockedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+    ).run(task.id, task.title, task.description, task.assignee, task.priority, JSON.stringify(task.tags), task.column, task.createdAt, task.recurring, task.subtasks ? JSON.stringify(task.subtasks) : null, task.projectId, task.wave, JSON.stringify(blockedByArr));
 
-  // Sync blockedBy to task_dependencies
-  for (const blockerId of blockedByArr) {
-    const blockerExists = db.prepare('SELECT id FROM tasks WHERE id = ?').get(blockerId);
-    if (blockerExists) {
-      db.prepare('INSERT OR IGNORE INTO task_dependencies (blocker_id, blocked_id) VALUES (?, ?)').run(blockerId, task.id);
+    // Sync blockedBy to task_dependencies
+    for (const blockerId of blockedByArr) {
+      const blockerExists = db.prepare('SELECT id FROM tasks WHERE id = ?').get(blockerId);
+      if (blockerExists) {
+        db.prepare('INSERT OR IGNORE INTO task_dependencies (blocker_id, blocked_id) VALUES (?, ?)').run(blockerId, task.id);
+      }
     }
+
+    // Log card creation
+    const actId = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+    db.prepare(
+      'INSERT INTO card_activity (id, taskId, type, content, author, createdAt) VALUES (?, ?, ?, ?, ?, ?)'
+    ).run(actId, task.id, 'created', `Card created in ${COL_LABELS[task.column] || task.column}`, task.assignee, task.createdAt);
+
+    res.status(201).json(task);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Internal server error" });
   }
-
-  // Log card creation
-  const actId = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
-  db.prepare(
-    'INSERT INTO card_activity (id, taskId, type, content, author, createdAt) VALUES (?, ?, ?, ?, ?, ?)'
-  ).run(actId, task.id, 'created', `Card created in ${COL_LABELS[task.column] || task.column}`, task.assignee, task.createdAt);
-
-  res.status(201).json(task);
 });
 
 // Update task
 app.put('/api/tasks/:id', (req, res) => {
+  try {
   const existing = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id);
   if (!existing) return res.status(404).json({ error: 'Not found' });
 
@@ -556,34 +585,40 @@ app.put('/api/tasks/:id', (req, res) => {
   }
 
   res.json(updated);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Internal server error" });
+  }
 });
 
 // Get single task
 app.get('/api/tasks/:id', (req, res) => {
-  const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id);
-  if (!task) return res.status(404).json({ error: 'Not found' });
-  // Get blockers and compute blocked status
-  const blockerIds = db.prepare('SELECT blocker_id FROM task_dependencies WHERE blocked_id = ?').all(task.id).map(r => r.blocker_id);
-  const activeBlockers = blockerIds.filter(bid => {
-    const b = db.prepare('SELECT "column" FROM tasks WHERE id = ?').get(bid);
-    return b && b.column !== 'done';
-  });
-  res.json({
-    ...task,
-    tags: JSON.parse(task.tags),
-    subtasks: task.subtasks ? JSON.parse(task.subtasks) : null,
-    blockedBy: task.blockedBy ? JSON.parse(task.blockedBy) : [],
-    blocked: activeBlockers.length > 0,
-    handoffLog: task.handoffLog ? JSON.parse(task.handoffLog) : [],
-    agentStatus: (() => {
-      if (task.column === 'done') return 'done';
-      if (!task.lockedBy) return 'idle';
-      const now = new Date();
-      const expires = task.lockExpiresAt ? new Date(task.lockExpiresAt) : null;
-      if (expires && expires < now) return 'idle'; // lock expired
-      return task.column === 'in-progress' ? 'in-progress' : 'claimed';
-    })(),
-  });
+  try {
+    const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id);
+    if (!task) return res.status(404).json({ error: 'Not found' });
+    // Get blockers and compute blocked status (single query instead of N+1)
+    const blockerRows = db.prepare('SELECT id, "column" FROM tasks WHERE id IN (SELECT blocker_id FROM task_dependencies WHERE blocked_id = ?)').all(task.id);
+    const activeBlockers = blockerRows.filter(b => b.column !== 'done');
+    res.json({
+      ...task,
+      tags: JSON.parse(task.tags),
+      subtasks: task.subtasks ? JSON.parse(task.subtasks) : null,
+      blockedBy: task.blockedBy ? JSON.parse(task.blockedBy) : [],
+      blocked: activeBlockers.length > 0,
+      handoffLog: task.handoffLog ? JSON.parse(task.handoffLog) : [],
+      agentStatus: (() => {
+        if (task.column === 'done') return 'done';
+        if (!task.lockedBy) return 'idle';
+        const now = new Date();
+        const expires = task.lockExpiresAt ? new Date(task.lockExpiresAt) : null;
+        if (expires && expires < now) return 'idle'; // lock expired
+        return task.column === 'in-progress' ? 'in-progress' : 'claimed';
+      })(),
+    });
+  } catch (err) {
+    console.error('GET /api/tasks/:id error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
 // POST /api/tasks/:id/spawn — spawn an agent for this card
@@ -737,46 +772,66 @@ app.get('/api/tasks/:id/logs', (req, res) => {
 
 // Delete task
 app.delete('/api/tasks/:id', (req, res) => {
-  db.prepare('DELETE FROM tasks WHERE id = ?').run(req.params.id);
-  res.status(204).end();
+  try {
+    db.prepare('DELETE FROM tasks WHERE id = ?').run(req.params.id);
+    res.status(204).end();
+  } catch (err) {
+    console.error('DELETE /api/tasks/:id error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
 // Get activity/comments for a task
 app.get('/api/tasks/:id/activity', (req, res) => {
-  const rows = db.prepare('SELECT * FROM card_activity WHERE taskId = ? ORDER BY createdAt ASC').all(req.params.id);
-  res.json(rows);
+  try {
+    const rows = db.prepare('SELECT * FROM card_activity WHERE taskId = ? ORDER BY createdAt ASC').all(req.params.id);
+    res.json(rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Internal server error" });
+  }
 });
 
 // Add a comment to a task
 app.post('/api/tasks/:id/comments', (req, res) => {
-  const task = db.prepare('SELECT id FROM tasks WHERE id = ?').get(req.params.id);
-  if (!task) return res.status(404).json({ error: 'Not found' });
+  try {
+    const task = db.prepare('SELECT id FROM tasks WHERE id = ?').get(req.params.id);
+    if (!task) return res.status(404).json({ error: 'Not found' });
 
-  const content = (req.body.content || '').trim();
-  if (!content) return res.status(400).json({ error: 'Comment cannot be empty' });
+    const content = (req.body.content || '').trim();
+    if (!content) return res.status(400).json({ error: 'Comment cannot be empty' });
 
-  const comment = {
-    id: Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
-    taskId: req.params.id,
-    type: 'comment',
-    content,
-    author: req.body.author || 'Mike',
-    createdAt: new Date().toISOString(),
-  };
+    const comment = {
+      id: Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
+      taskId: req.params.id,
+      type: 'comment',
+      content,
+      author: req.body.author || 'Mike',
+      createdAt: new Date().toISOString(),
+    };
 
-  db.prepare(
-    'INSERT INTO card_activity (id, taskId, type, content, author, createdAt) VALUES (?, ?, ?, ?, ?, ?)'
-  ).run(comment.id, comment.taskId, comment.type, comment.content, comment.author, comment.createdAt);
+    db.prepare(
+      'INSERT INTO card_activity (id, taskId, type, content, author, createdAt) VALUES (?, ?, ?, ?, ?, ?)'
+    ).run(comment.id, comment.taskId, comment.type, comment.content, comment.author, comment.createdAt);
 
-  res.status(201).json(comment);
+    res.status(201).json(comment);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Internal server error" });
+  }
 });
 
 // Delete a comment
 app.delete('/api/activity/:id', (req, res) => {
-  const row = db.prepare('SELECT * FROM card_activity WHERE id = ?').get(req.params.id);
-  if (!row || row.type !== 'comment') return res.status(404).json({ error: 'Not found' });
-  db.prepare('DELETE FROM card_activity WHERE id = ?').run(req.params.id);
-  res.status(204).end();
+  try {
+    const row = db.prepare('SELECT * FROM card_activity WHERE id = ?').get(req.params.id);
+    if (!row || row.type !== 'comment') return res.status(404).json({ error: 'Not found' });
+    db.prepare('DELETE FROM card_activity WHERE id = ?').run(req.params.id);
+    res.status(204).end();
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Internal server error" });
+  }
 });
 
 // ─── Notifications ────────────────────────────────────────────────────────────
@@ -1112,6 +1167,14 @@ Send a BlueBubbles message to +18183121807:
     }
   }
 })();
+
+// ─── Background lock expiry cleanup ──────────────────────────────────────────
+// Run every 60 seconds to clear stale locks, keeping GET /api/tasks read-only.
+setInterval(() => {
+  db.prepare(
+    "UPDATE tasks SET lockedBy=NULL,lockedAt=NULL,lockExpiresAt=NULL WHERE lockExpiresAt IS NOT NULL AND lockExpiresAt < datetime(\"now\")"
+  ).run();
+}, 60000);
 
 app.listen(PORT, '127.0.0.1', () => {
   console.log(`Kanban board running at http://127.0.0.1:${PORT}`);
