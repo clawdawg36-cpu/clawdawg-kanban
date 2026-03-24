@@ -4,7 +4,6 @@ const fs = require('fs');
 const multer = require('multer');
 const helmet = require('helmet');
 const cors = require('cors');
-const { rateLimit } = require('express-rate-limit');
 const db = require('./db');
 
 // ─── Multer config for file uploads ──────────────────────────────────────────
@@ -94,46 +93,71 @@ app.use('/api', (req, res, next) => {
   next();
 });
 
-// ─── Rate Limiting ────────────────────────────────────────────────────────────
+// ─── Rate Limiting (in-memory, no external deps) ─────────────────────────────
+// Map<ip, Map<bucket, {count, resetAt}>>
+// Buckets: 'logs' (60/min), 'spawn' (20/min), 'write' (120/min)
+const _rateLimitStore = new Map();
 
-// General limiter: 300 req/min per IP on all /api/* routes
-const generalApiLimiter = rateLimit({
-  windowMs: 60 * 1000,
-  max: 300,
-  standardHeaders: true,
-  legacyHeaders: false,
-  handler: (req, res) => res.status(429).json({ error: 'Too many requests' }),
-});
+function _getClient(ip) {
+  if (!_rateLimitStore.has(ip)) _rateLimitStore.set(ip, new Map());
+  return _rateLimitStore.get(ip);
+}
 
-// Strict write limiter: 60 req/min per IP (POST/PUT/DELETE), skips log endpoint
-const writeLimiter = rateLimit({
-  windowMs: 60 * 1000,
-  max: 60,
-  standardHeaders: true,
-  legacyHeaders: false,
-  skip: (req) => /^\/tasks\/[^\/]+\/logs$/.test(req.path),
-  handler: (req, res) => res.status(429).json({ error: 'Too many requests' }),
-});
+function checkRateLimit(ip, bucket, maxPerMin) {
+  const now = Date.now();
+  const client = _getClient(ip);
+  let entry = client.get(bucket);
+  if (!entry || now >= entry.resetAt) {
+    entry = { count: 0, resetAt: now + 60 * 1000 };
+    client.set(bucket, entry);
+  }
+  entry.count++;
+  if (entry.count > maxPerMin) {
+    return { limited: true, retryAfter: Math.ceil((entry.resetAt - now) / 1000) };
+  }
+  return { limited: false };
+}
 
-// Log limiter: 120 req/min per IP for /api/tasks/:id/logs (agent log spam)
-const logLimiter = rateLimit({
-  windowMs: 60 * 1000,
-  max: 120,
-  standardHeaders: true,
-  legacyHeaders: false,
-  handler: (req, res) => res.status(429).json({ error: 'Too many requests' }),
-});
+// Clean up stale IP entries every 5 minutes to prevent unbounded growth
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, buckets] of _rateLimitStore) {
+    for (const [bucket, entry] of buckets) {
+      if (now >= entry.resetAt) buckets.delete(bucket);
+    }
+    if (buckets.size === 0) _rateLimitStore.delete(ip);
+  }
+}, 5 * 60 * 1000);
 
-// Apply general limiter to all /api/* routes
-app.use('/api', generalApiLimiter);
+// Single write rate-limit middleware: selects bucket by path pattern
+// - /api/tasks/:id/logs        → 60/min
+// - /api/tasks/:id/claim       → 20/min
+// - /api/tasks/claim-next      → 20/min
+// - /api/tasks/:id/spawn       → 20/min
+// - all other writes (POST/PUT/DELETE) → 120/min
+const writeRateLimitMiddleware = (req, res, next) => {
+  const ip = req.ip || req.connection.remoteAddress || '0.0.0.0';
+  const p = req.path; // path relative to app root, e.g. /api/tasks/abc123/logs
+  let bucket, limit;
+  if (/^\/api\/tasks\/[^/]+\/logs$/.test(p)) {
+    bucket = 'logs'; limit = 60;
+  } else if (/^\/api\/tasks\/[^/]+\/claim$/.test(p) || /^\/api\/tasks\/claim-next$/.test(p) || /^\/api\/tasks\/[^/]+\/spawn$/.test(p)) {
+    bucket = 'spawn'; limit = 20;
+  } else {
+    bucket = 'write'; limit = 120;
+  }
+  const result = checkRateLimit(ip, bucket, limit);
+  if (result.limited) {
+    res.set('Retry-After', String(result.retryAfter));
+    return res.status(429).json({ error: 'Too many requests', retryAfter: result.retryAfter });
+  }
+  next();
+};
 
-// Apply write limiter to all POST/PUT/DELETE on /api/* (skips log endpoint)
-app.post('/api/*splat', writeLimiter);
-app.put('/api/*splat', writeLimiter);
-app.delete('/api/*splat', writeLimiter);
-
-// Apply dedicated log limiter to POST /api/tasks/:id/logs (120/min)
-app.post('/api/tasks/:id/logs', logLimiter);
+// Apply to all write methods on /api/*
+app.post('/api/*splat', writeRateLimitMiddleware);
+app.put('/api/*splat', writeRateLimitMiddleware);
+app.delete('/api/*splat', writeRateLimitMiddleware);
 
 // ─── Webhook event emitter ────────────────────────────────────────────────────
 const https = require('https');
