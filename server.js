@@ -847,10 +847,30 @@ app.post('/api/tasks/:id/logs', (req, res) => {
   }
 });
 
-// GET /api/tasks/:id/logs — get all log entries for a task
+// GET /api/tasks/:id/logs — get log entries for a task (paginated)
+// Query params: ?limit=100&offset=0 (default limit 100, max 500), ?level=info|warn|error, ?since=<ISO8601>
 app.get('/api/tasks/:id/logs', (req, res) => {
   try {
-    const rows = db.prepare('SELECT * FROM agent_logs WHERE taskId = ? ORDER BY timestamp ASC').all(req.params.id);
+    const limit = Math.min(parseInt(req.query.limit, 10) || 100, 500);
+    const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
+    const level = ['info', 'warn', 'error'].includes(req.query.level) ? req.query.level : null;
+    const since = req.query.since || null;
+
+    let query = 'SELECT * FROM agent_logs WHERE taskId = ?';
+    const params = [req.params.id];
+
+    if (level) {
+      query += ' AND level = ?';
+      params.push(level);
+    }
+    if (since) {
+      query += ' AND timestamp > ?';
+      params.push(since);
+    }
+    query += ' ORDER BY timestamp ASC LIMIT ? OFFSET ?';
+    params.push(limit, offset);
+
+    const rows = db.prepare(query).all(...params);
     res.json(rows);
   } catch (err) {
     console.error(err);
@@ -861,7 +881,17 @@ app.get('/api/tasks/:id/logs', (req, res) => {
 // Delete task
 app.delete('/api/tasks/:id', (req, res) => {
   try {
-    db.prepare('DELETE FROM tasks WHERE id = ?').run(req.params.id);
+    const deleteTask = db.transaction(() => {
+      const taskId = req.params.id;
+      // Cascade cleanup of all child tables (foreign_keys pragma not enabled, so manual)
+      db.prepare('DELETE FROM agent_logs WHERE taskId = ?').run(taskId);
+      db.prepare('DELETE FROM card_activity WHERE taskId = ?').run(taskId);
+      db.prepare('DELETE FROM notifications WHERE task_id = ?').run(taskId);
+      db.prepare('DELETE FROM task_dependencies WHERE blocker_id = ? OR blocked_id = ?').run(taskId, taskId);
+      db.prepare('DELETE FROM attachments WHERE task_id = ?').run(taskId);
+      db.prepare('DELETE FROM tasks WHERE id = ?').run(taskId);
+    });
+    deleteTask();
     res.status(204).end();
   } catch (err) {
     console.error('DELETE /api/tasks/:id error:', err);
@@ -959,10 +989,13 @@ app.delete('/api/notifications/:id', (req, res) => {
 
 // --- Task Dependencies ---
 
-// Get all dependencies (full map)
+// Get all dependencies (full map, paginated)
+// Query params: ?limit=100&offset=0 (default limit 100, max 500)
 app.get('/api/dependencies', (req, res) => {
   try {
-    const rows = db.prepare('SELECT blocker_id, blocked_id FROM task_dependencies').all();
+    const limit = Math.min(parseInt(req.query.limit, 10) || 100, 500);
+    const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
+    const rows = db.prepare('SELECT blocker_id, blocked_id FROM task_dependencies LIMIT ? OFFSET ?').all(limit, offset);
     res.json(rows);
   } catch (err) {
     console.error(err);
@@ -1340,7 +1373,7 @@ Send a BlueBubbles message to +18183121807:
 // Run immediately at startup to clear any expired locks from a prior run,
 // then repeat every 60 seconds. Keeps GET /api/tasks read-only.
 const expireStaleLocksStmt = db.prepare(
-  "UPDATE tasks SET lockedBy=NULL,lockedAt=NULL,lockExpiresAt=NULL WHERE lockExpiresAt IS NOT NULL AND lockExpiresAt < datetime(\"now\")"
+  "UPDATE tasks SET lockedBy=NULL,lockedAt=NULL,lockExpiresAt=NULL WHERE lockExpiresAt IS NOT NULL AND lockExpiresAt < datetime('now')"
 );
 expireStaleLocksStmt.run(); // clear on startup
 setInterval(() => {
