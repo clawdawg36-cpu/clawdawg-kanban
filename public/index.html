@@ -235,6 +235,25 @@ header {
 .card-priority.high { background: var(--orange); }
 .card-priority.urgent { background: var(--red); }
 
+/* Priority badge pill — accessible text indicator (WCAG 1.4.1) */
+.priority-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  padding: 2px 7px;
+  border-radius: 20px;
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  line-height: 1.4;
+}
+.priority-badge.low    { background: rgba(0,184,148,0.15); color: var(--green); border: 1px solid rgba(0,184,148,0.3); }
+.priority-badge.medium { background: rgba(116,185,255,0.15); color: var(--blue); border: 1px solid rgba(116,185,255,0.3); }
+.priority-badge.high   { background: rgba(253,167,73,0.15); color: var(--orange); border: 1px solid rgba(253,167,73,0.3); }
+.priority-badge.urgent { background: rgba(225,112,85,0.15); color: var(--red); border: 1px solid rgba(225,112,85,0.3); }
+
 .card-title {
   font-size: 14px;
   font-weight: 600;
@@ -3341,13 +3360,20 @@ function render() {
     // Build columns via document fragment to reduce DOM churn
     const frag = document.createDocumentFragment();
     const tmp = document.createElement('div');
+    // Only show swimlane headers when 2+ distinct priority tiers are present
+    const activePriorityTiers = PRIORITY_ORDER.filter(p => grouped[p].length > 0);
+    const showSwimlaneHeaders = activePriorityTiers.length >= 2;
     PRIORITY_ORDER.forEach(p => {
       if (!grouped[p].length) return;
       const meta = PRIORITY_META[p];
-      tmp.innerHTML = `<div class="swimlane-header">
-        <span class="swimlane-label" style="color:${meta.color}">${meta.emoji} ${meta.label}</span>
-        <span class="swimlane-line"></span>
-      </div>` + grouped[p].map(t => cardHTML(t, q)).join('');
+      if (showSwimlaneHeaders) {
+        tmp.innerHTML = `<div class="swimlane-header">
+          <span class="swimlane-label" style="color:${meta.color}">${meta.emoji} ${meta.label}</span>
+          <span class="swimlane-line"></span>
+        </div>` + grouped[p].map(t => cardHTML(t, q)).join('');
+      } else {
+        tmp.innerHTML = grouped[p].map(t => cardHTML(t, q)).join('');
+      }
       while (tmp.firstChild) frag.appendChild(tmp.firstChild);
     });
     // Preserve or create .no-results node so we can reuse it
@@ -3507,6 +3533,7 @@ function cardHTML(t, q) {
       <button class="card-action-btn delete" onclick="deleteTask('${t.id}', event)" title="Delete card" aria-label="Delete ${esc(t.title)}">&times;</button>
     </div>
     <div class="card-title">${q ? highlightText(t.title, q) : esc(t.title)}</div>
+    ${t.priority ? `<div class="priority-badge ${t.priority}">${{ urgent: '🔴 Urgent', high: '🟠 High', medium: '🟡 Medium', low: '🟢 Low' }[t.priority] || esc(t.priority)}</div>` : ''}
     ${t.description ? `<div class="card-desc">${q ? highlightText(t.description, q) : esc(t.description)}</div>` : ''}
     ${blockedBanner}
     ${tags ? `<div class="card-tags">${tags}</div>` : ''}
