@@ -93,20 +93,50 @@ const http = require('http');
 const crypto = require('crypto');
 const dns = require('dns');
 
-// Server-side key for HMAC-hashing webhook secrets at rest.
-// Falls back to a stable derived key so existing servers without the env var work.
-const WEBHOOK_SECRET_KEY = process.env.WEBHOOK_SECRET_KEY ||
-  crypto.createHash('sha256').update('kanban-webhook-secret-key-default').digest('hex');
+// Server-side encryption key for webhook secrets at rest (AES-256-GCM).
+// Set WEBHOOK_ENCRYPT_KEY in env as a 64-char hex string (32 bytes).
+// Falls back to a deterministic derived key — set a real env var in production.
+const _rawEncryptKey = process.env.WEBHOOK_ENCRYPT_KEY ||
+  crypto.createHash('sha256').update('kanban-webhook-encrypt-key-default').digest('hex');
+const WEBHOOK_ENCRYPT_KEY = Buffer.from(_rawEncryptKey.slice(0, 64), 'hex'); // 32 bytes
 
-// Hash a plaintext secret for storage.
-function hashWebhookSecret(plaintext) {
-  return crypto.createHmac('sha256', WEBHOOK_SECRET_KEY).update(plaintext).digest('hex');
+const WEBHOOK_SECRET_SENTINEL = 'enc:v1:'; // prefix on all encrypted values
+
+// Encrypt a plaintext webhook secret for at-rest storage.
+// Returns: "enc:v1:<iv_hex>:<authTag_hex>:<ciphertext_hex>"
+function encryptWebhookSecret(plaintext) {
+  const iv = crypto.randomBytes(12); // 96-bit IV for GCM
+  const cipher = crypto.createCipheriv('aes-256-gcm', WEBHOOK_ENCRYPT_KEY, iv);
+  const encrypted = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return WEBHOOK_SECRET_SENTINEL + iv.toString('hex') + ':' + tag.toString('hex') + ':' + encrypted.toString('hex');
 }
 
-// Mask a stored (hashed) secret for display — show only last 4 chars.
+// Decrypt a stored webhook secret. Returns plaintext, or null on failure.
+function decryptWebhookSecret(stored) {
+  if (!stored) return null;
+  if (!stored.startsWith(WEBHOOK_SECRET_SENTINEL)) {
+    // Legacy plaintext value — return as-is (will be re-encrypted on next rotation)
+    return stored;
+  }
+  try {
+    const parts = stored.slice(WEBHOOK_SECRET_SENTINEL.length).split(':');
+    if (parts.length !== 3) return null;
+    const [ivHex, tagHex, ctHex] = parts;
+    const decipher = crypto.createDecipheriv('aes-256-gcm', WEBHOOK_ENCRYPT_KEY, Buffer.from(ivHex, 'hex'));
+    decipher.setAuthTag(Buffer.from(tagHex, 'hex'));
+    return decipher.update(Buffer.from(ctHex, 'hex')).toString('utf8') + decipher.final('utf8');
+  } catch {
+    return null;
+  }
+}
+
+// Mask a stored secret for display — show only "••••" + last 4 chars of the decrypted value.
 function maskSecret(stored) {
   if (!stored) return null;
-  return '••••' + stored.slice(-4);
+  const plaintext = decryptWebhookSecret(stored);
+  if (!plaintext) return '••••';
+  return '••••' + plaintext.slice(-4);
 }
 
 // Generate a new random webhook secret (URL-safe base64, 32 bytes).
@@ -541,8 +571,8 @@ app.put('/api/tasks/:id', (req, res) => {
       const newId = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
       const newCreatedAt = new Date().toISOString();
       db.prepare(
-        'INSERT INTO tasks (id, title, description, assignee, priority, tags, "column", createdAt, recurring, subtasks) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-      ).run(newId, existing.title, existing.description, existing.assignee, existing.priority, existing.tags, 'backlog', newCreatedAt, existing.recurring, null);
+        'INSERT INTO tasks (id, title, description, assignee, priority, tags, "column", createdAt, recurring, subtasks, projectId, wave) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+      ).run(newId, existing.title, existing.description, existing.assignee, existing.priority, existing.tags, 'backlog', newCreatedAt, existing.recurring, null, existing.projectId || 'default', existing.wave || null);
       const recActId = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
       db.prepare(
         'INSERT INTO card_activity (id, taskId, type, content, author, createdAt) VALUES (?, ?, ?, ?, ?, ?)'
@@ -843,58 +873,93 @@ app.delete('/api/activity/:id', (req, res) => {
 
 // Get notifications (recent column change events)
 app.get('/api/notifications', (req, res) => {
-  const rows = db.prepare('SELECT * FROM notifications ORDER BY created_at DESC LIMIT 50').all();
-  res.json(rows);
+  try {
+    const rows = db.prepare('SELECT * FROM notifications ORDER BY created_at DESC LIMIT 50').all();
+    res.json(rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Internal server error" });
+  }
 });
 
 // Mark all notifications as read
 app.post('/api/notifications/read', (req, res) => {
-  db.prepare('UPDATE notifications SET is_read = 1 WHERE is_read = 0').run();
-  res.json({ ok: true });
+  try {
+    db.prepare('UPDATE notifications SET is_read = 1 WHERE is_read = 0').run();
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Internal server error" });
+  }
 });
 
 // Dismiss / delete a notification
 app.delete('/api/notifications/:id', (req, res) => {
-  db.prepare('DELETE FROM notifications WHERE id = ?').run(req.params.id);
-  res.status(204).end();
+  try {
+    db.prepare('DELETE FROM notifications WHERE id = ?').run(req.params.id);
+    res.status(204).end();
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Internal server error" });
+  }
 });
 
 // --- Task Dependencies ---
 
 // Get all dependencies (full map)
 app.get('/api/dependencies', (req, res) => {
-  const rows = db.prepare('SELECT blocker_id, blocked_id FROM task_dependencies').all();
-  res.json(rows);
+  try {
+    const rows = db.prepare('SELECT blocker_id, blocked_id FROM task_dependencies').all();
+    res.json(rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Internal server error" });
+  }
 });
 
 // Get blockers for a task (what blocks it)
 app.get('/api/tasks/:id/blockers', (req, res) => {
-  const rows = db.prepare(`
-    SELECT t.* FROM tasks t
-    INNER JOIN task_dependencies d ON d.blocker_id = t.id
-    WHERE d.blocked_id = ?
-  `).all(req.params.id);
-  res.json(rows.map(r => ({ ...r, tags: JSON.parse(r.tags) })));
+  try {
+    const rows = db.prepare(`
+      SELECT t.* FROM tasks t
+      INNER JOIN task_dependencies d ON d.blocker_id = t.id
+      WHERE d.blocked_id = ?
+    `).all(req.params.id);
+    res.json(rows.map(r => ({ ...r, tags: JSON.parse(r.tags) })));
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Internal server error" });
+  }
 });
 
 // Add a blocker dependency
 app.post('/api/tasks/:id/blockers', (req, res) => {
-  const { blocker_id } = req.body;
-  const blocked_id = req.params.id;
-  if (!blocker_id) return res.status(400).json({ error: 'blocker_id required' });
-  if (blocker_id === blocked_id) return res.status(400).json({ error: 'A task cannot block itself' });
-  const blockerExists = db.prepare('SELECT id FROM tasks WHERE id = ?').get(blocker_id);
-  const blockedExists = db.prepare('SELECT id FROM tasks WHERE id = ?').get(blocked_id);
-  if (!blockerExists || !blockedExists) return res.status(404).json({ error: 'Task not found' });
-  db.prepare('INSERT OR IGNORE INTO task_dependencies (blocker_id, blocked_id) VALUES (?, ?)').run(blocker_id, blocked_id);
-  res.status(201).json({ blocker_id, blocked_id });
+  try {
+    const { blocker_id } = req.body;
+    const blocked_id = req.params.id;
+    if (!blocker_id) return res.status(400).json({ error: 'blocker_id required' });
+    if (blocker_id === blocked_id) return res.status(400).json({ error: 'A task cannot block itself' });
+    const blockerExists = db.prepare('SELECT id FROM tasks WHERE id = ?').get(blocker_id);
+    const blockedExists = db.prepare('SELECT id FROM tasks WHERE id = ?').get(blocked_id);
+    if (!blockerExists || !blockedExists) return res.status(404).json({ error: 'Task not found' });
+    db.prepare('INSERT OR IGNORE INTO task_dependencies (blocker_id, blocked_id) VALUES (?, ?)').run(blocker_id, blocked_id);
+    res.status(201).json({ blocker_id, blocked_id });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Internal server error" });
+  }
 });
 
 // Remove a blocker dependency
 app.delete('/api/tasks/:id/blockers/:blocker_id', (req, res) => {
-  db.prepare('DELETE FROM task_dependencies WHERE blocker_id = ? AND blocked_id = ?')
-    .run(req.params.blocker_id, req.params.id);
-  res.status(204).end();
+  try {
+    db.prepare('DELETE FROM task_dependencies WHERE blocker_id = ? AND blocked_id = ?')
+      .run(req.params.blocker_id, req.params.id);
+    res.status(204).end();
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Internal server error" });
+  }
 });
 
 // ─── File Attachments ─────────────────────────────────────────────────────────
