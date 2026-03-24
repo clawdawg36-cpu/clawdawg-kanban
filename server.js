@@ -263,20 +263,23 @@ app.post('/api/projects', (req, res) => {
     emoji: req.body.emoji || '📋',
     createdAt: new Date().toISOString(),
   };
-  db.prepare(
-    'INSERT INTO projects (id, name, color, emoji, createdAt) VALUES (?, ?, ?, ?, ?)'
-  ).run(project.id, project.name, project.color, project.emoji, project.createdAt);
-  // Create default agent-task template for new project
   const tmplId = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
   const newProjDefaultDesc = `Read /Users/mike/.openclaw/workspace/SUBAGENTS.md first — it has everything you need: git workflow, notifications, kanban API, conflict avoidance, and ground rules.\n\n## Task\n\n[describe task here]\n\n## Git Workflow\n\n\`\`\`bash\ncd /path/to/repo\ngit pull origin main\ngit add -A\ngit commit -m "feat|fix|chore: short description"\ngh auth switch --user clawdawg36-cpu\ngit push\ngh auth switch --user mikejwhitehead\n\`\`\`\n\n## Notifications\n\nSend a BlueBubbles message to +18183121807:\n- START: "🔨 Starting: [task title]"\n- FINISH: "✅ Done: [task title]\\n[2-3 sentences on what changed]"\n- BLOCKER: "⚠️ Blocked: [task title]\\n[what you need and why]"`;
-  db.prepare(
-    'INSERT INTO templates (id, projectId, name, defaultDescription, defaultTags, defaultAssignee, defaultPriority, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
-  ).run(
-    tmplId, project.id, 'agent-task',
-    newProjDefaultDesc,
-    JSON.stringify(['agent', 'automation']),
-    'ClawDawg', 'medium', new Date().toISOString()
-  );
+  const createProject = db.transaction(() => {
+    db.prepare(
+      'INSERT INTO projects (id, name, color, emoji, createdAt) VALUES (?, ?, ?, ?, ?)'
+    ).run(project.id, project.name, project.color, project.emoji, project.createdAt);
+    // Create default agent-task template for new project
+    db.prepare(
+      'INSERT INTO templates (id, projectId, name, defaultDescription, defaultTags, defaultAssignee, defaultPriority, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+    ).run(
+      tmplId, project.id, 'agent-task',
+      newProjDefaultDesc,
+      JSON.stringify(['agent', 'automation']),
+      'ClawDawg', 'medium', new Date().toISOString()
+    );
+  });
+  createProject();
   res.status(201).json(project);
   } catch (err) {
     console.error('POST /api/projects error:', err);
@@ -966,37 +969,47 @@ app.delete('/api/tasks/:id/blockers/:blocker_id', (req, res) => {
 
 // Serve uploaded files via controlled route (NOT express.static — prevents stored XSS)
 app.get('/uploads/:filename', (req, res) => {
-  // Validate filename: no path traversal, only alphanumeric + safe chars
-  const filename = req.params.filename;
-  if (!filename || /[/\\]/.test(filename)) {
-    return res.status(400).json({ error: 'Invalid filename' });
+  try {
+    // Validate filename: no path traversal, only alphanumeric + safe chars
+    const filename = req.params.filename;
+    if (!filename || /[/\\]/.test(filename)) {
+      return res.status(400).json({ error: 'Invalid filename' });
+    }
+
+    const resolvedPath = path.resolve(path.join(UPLOADS_DIR, filename));
+    // Ensure resolved path is strictly within UPLOADS_DIR
+    if (!resolvedPath.startsWith(UPLOADS_DIR + path.sep) && resolvedPath !== UPLOADS_DIR) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    // Look up attachment in DB to get original_name and trusted mimetype
+    const row = db.prepare('SELECT * FROM attachments WHERE filename = ?').get(filename);
+    if (!row) return res.status(404).json({ error: 'Not found' });
+
+    if (!fs.existsSync(resolvedPath)) return res.status(404).json({ error: 'File not found on disk' });
+
+    // Force download with original name; use DB-stored mimetype (not user-supplied)
+    res.setHeader('Content-Type', row.mimetype);
+    res.setHeader('Content-Disposition', `attachment; filename="${row.original_name.replace(/"/g, '\\"')}"`);
+    // Prevent browser from executing content even if content-type is wrong
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+
+    fs.createReadStream(resolvedPath).pipe(res);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Internal server error" });
   }
-
-  const resolvedPath = path.resolve(path.join(UPLOADS_DIR, filename));
-  // Ensure resolved path is strictly within UPLOADS_DIR
-  if (!resolvedPath.startsWith(UPLOADS_DIR + path.sep) && resolvedPath !== UPLOADS_DIR) {
-    return res.status(403).json({ error: 'Access denied' });
-  }
-
-  // Look up attachment in DB to get original_name and trusted mimetype
-  const row = db.prepare('SELECT * FROM attachments WHERE filename = ?').get(filename);
-  if (!row) return res.status(404).json({ error: 'Not found' });
-
-  if (!fs.existsSync(resolvedPath)) return res.status(404).json({ error: 'File not found on disk' });
-
-  // Force download with original name; use DB-stored mimetype (not user-supplied)
-  res.setHeader('Content-Type', row.mimetype);
-  res.setHeader('Content-Disposition', `attachment; filename="${row.original_name.replace(/"/g, '\\"')}"`);
-  // Prevent browser from executing content even if content-type is wrong
-  res.setHeader('X-Content-Type-Options', 'nosniff');
-
-  fs.createReadStream(resolvedPath).pipe(res);
 });
 
 // GET /api/tasks/:id/attachments — list attachments for a task
 app.get('/api/tasks/:id/attachments', (req, res) => {
-  const rows = db.prepare('SELECT * FROM attachments WHERE task_id = ? ORDER BY uploadedAt ASC').all(req.params.id);
-  res.json(rows);
+  try {
+    const rows = db.prepare('SELECT * FROM attachments WHERE task_id = ? ORDER BY uploadedAt ASC').all(req.params.id);
+    res.json(rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Internal server error" });
+  }
 });
 
 // POST /api/tasks/:id/attachments — upload a file
@@ -1011,50 +1024,60 @@ app.post('/api/tasks/:id/attachments', (req, res, next) => {
     next();
   });
 }, (req, res) => {
-  const task = db.prepare('SELECT id FROM tasks WHERE id = ?').get(req.params.id);
-  if (!task) return res.status(404).json({ error: 'Task not found' });
-  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+  try {
+    const task = db.prepare('SELECT id FROM tasks WHERE id = ?').get(req.params.id);
+    if (!task) return res.status(404).json({ error: 'Task not found' });
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
 
-  const attachment = {
-    id: Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
-    task_id: req.params.id,
-    filename: req.file.filename,
-    original_name: req.file.originalname,
-    path: req.file.path,
-    mimetype: req.file.mimetype,
-    size: req.file.size,
-    uploadedAt: new Date().toISOString(),
-  };
+    const attachment = {
+      id: Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
+      task_id: req.params.id,
+      filename: req.file.filename,
+      original_name: req.file.originalname,
+      path: req.file.path,
+      mimetype: req.file.mimetype,
+      size: req.file.size,
+      uploadedAt: new Date().toISOString(),
+    };
 
-  db.prepare(
-    'INSERT INTO attachments (id, task_id, filename, original_name, path, mimetype, size, uploadedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
-  ).run(attachment.id, attachment.task_id, attachment.filename, attachment.original_name, attachment.path, attachment.mimetype, attachment.size, attachment.uploadedAt);
+    db.prepare(
+      'INSERT INTO attachments (id, task_id, filename, original_name, path, mimetype, size, uploadedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+    ).run(attachment.id, attachment.task_id, attachment.filename, attachment.original_name, attachment.path, attachment.mimetype, attachment.size, attachment.uploadedAt);
 
-  // Log activity
-  const actId = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
-  db.prepare(
-    'INSERT INTO card_activity (id, taskId, type, content, author, createdAt) VALUES (?, ?, ?, ?, ?, ?)'
-  ).run(actId, req.params.id, 'attachment', `Attached file: ${req.file.originalname}`, 'System', attachment.uploadedAt);
+    // Log activity
+    const actId = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+    db.prepare(
+      'INSERT INTO card_activity (id, taskId, type, content, author, createdAt) VALUES (?, ?, ?, ?, ?, ?)'
+    ).run(actId, req.params.id, 'attachment', `Attached file: ${req.file.originalname}`, 'System', attachment.uploadedAt);
 
-  res.status(201).json(attachment);
+    res.status(201).json(attachment);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Internal server error" });
+  }
 });
 
 // DELETE /api/attachments/:id — remove an attachment
 app.delete('/api/attachments/:id', (req, res) => {
-  const row = db.prepare('SELECT * FROM attachments WHERE id = ?').get(req.params.id);
-  if (!row) return res.status(404).json({ error: 'Not found' });
+  try {
+    const row = db.prepare('SELECT * FROM attachments WHERE id = ?').get(req.params.id);
+    if (!row) return res.status(404).json({ error: 'Not found' });
 
-  // Reconstruct path from UPLOADS_DIR + filename (NOT from DB-stored path field — path traversal risk)
-  const safePath = path.resolve(path.join(UPLOADS_DIR, row.filename));
-  if (!safePath.startsWith(UPLOADS_DIR + path.sep) && safePath !== UPLOADS_DIR) {
-    return res.status(403).json({ error: 'Access denied' });
+    // Reconstruct path from UPLOADS_DIR + filename (NOT from DB-stored path field — path traversal risk)
+    const safePath = path.resolve(path.join(UPLOADS_DIR, row.filename));
+    if (!safePath.startsWith(UPLOADS_DIR + path.sep) && safePath !== UPLOADS_DIR) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    // Delete file from disk
+    try { fs.unlinkSync(safePath); } catch (e) { /* ignore if already gone */ }
+
+    db.prepare('DELETE FROM attachments WHERE id = ?').run(req.params.id);
+    res.status(204).end();
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Internal server error" });
   }
-
-  // Delete file from disk
-  try { fs.unlinkSync(safePath); } catch (e) { /* ignore if already gone */ }
-
-  db.prepare('DELETE FROM attachments WHERE id = ?').run(req.params.id);
-  res.status(204).end();
 });
 
 // ─── Webhooks ─────────────────────────────────────────────────────────────────
@@ -1106,7 +1129,7 @@ app.post('/api/webhooks', async (req, res) => {
       url: req.body.url || '',
       events: req.body.events || [],
       // Hash the secret before storing — never persist plaintext
-      secret: hashWebhookSecret(plaintextSecret),
+      secret: encryptWebhookSecret(plaintextSecret),
       createdAt: new Date().toISOString(),
     };
     if (!hook.url) return res.status(400).json({ error: 'url required' });
@@ -1143,54 +1166,59 @@ app.delete('/api/webhooks/:id', (req, res) => {
 
 // ─── Stats Dashboard ─────────────────────────────────────────────────────────
 app.get('/api/stats', (req, res) => {
-  // Default to "default" project if no projectId passed (backwards compatible)
-  const projectId = req.query.projectId || 'default';
+  try {
+    // Default to "default" project if no projectId passed (backwards compatible)
+    const projectId = req.query.projectId || 'default';
 
-  // Look up project name for display
-  const project = db.prepare('SELECT name FROM projects WHERE id = ?').get(projectId);
-  const projectName = project ? project.name : projectId;
+    // Look up project name for display
+    const project = db.prepare('SELECT name FROM projects WHERE id = ?').get(projectId);
+    const projectName = project ? project.name : projectId;
 
-  // Tasks by assignee (scoped to project)
-  const assigneeRows = db.prepare('SELECT assignee, COUNT(*) as cnt FROM tasks WHERE projectId = ? GROUP BY assignee').all(projectId);
-  const totalByAssignee = {};
-  assigneeRows.forEach(r => { totalByAssignee[r.assignee] = r.cnt; });
+    // Tasks by assignee (scoped to project)
+    const assigneeRows = db.prepare('SELECT assignee, COUNT(*) as cnt FROM tasks WHERE projectId = ? GROUP BY assignee').all(projectId);
+    const totalByAssignee = {};
+    assigneeRows.forEach(r => { totalByAssignee[r.assignee] = r.cnt; });
 
-  // Column counts (scoped to project)
-  const colRows = db.prepare('SELECT "column", COUNT(*) as cnt FROM tasks WHERE projectId = ? GROUP BY "column"').all(projectId);
-  const columnCounts = {};
-  colRows.forEach(r => { columnCounts[r.column] = r.cnt; });
+    // Column counts (scoped to project)
+    const colRows = db.prepare('SELECT "column", COUNT(*) as cnt FROM tasks WHERE projectId = ? GROUP BY "column"').all(projectId);
+    const columnCounts = {};
+    colRows.forEach(r => { columnCounts[r.column] = r.cnt; });
 
-  // Completed this week (tasks moved to done in last 7 days via card_activity, scoped to project)
-  const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-  const completedThisWeek = db.prepare(
-    `SELECT COUNT(DISTINCT a.taskId) as cnt FROM card_activity a
-     INNER JOIN tasks t ON t.id = a.taskId
-     WHERE a.type = 'move' AND a.content LIKE '%→ Done%' AND a.createdAt >= ? AND t.projectId = ?`
-  ).get(weekAgo, projectId).cnt;
+    // Completed this week (tasks moved to done in last 7 days via card_activity, scoped to project)
+    const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    const completedThisWeek = db.prepare(
+      `SELECT COUNT(DISTINCT a.taskId) as cnt FROM card_activity a
+       INNER JOIN tasks t ON t.id = a.taskId
+       WHERE a.type = 'move' AND a.content LIKE '%→ Done%' AND a.createdAt >= ? AND t.projectId = ?`
+    ).get(weekAgo, projectId).cnt;
 
-  // Overdue count (scoped to project)
-  const now = new Date().toISOString().slice(0, 10);
-  const overdueCount = db.prepare(
-    `SELECT COUNT(*) as cnt FROM tasks WHERE dueDate IS NOT NULL AND dueDate < ? AND "column" != 'done' AND projectId = ?`
-  ).get(now, projectId).cnt;
+    // Overdue count (scoped to project)
+    const now = new Date().toISOString().slice(0, 10);
+    const overdueCount = db.prepare(
+      `SELECT COUNT(*) as cnt FROM tasks WHERE dueDate IS NOT NULL AND dueDate < ? AND "column" != 'done' AND projectId = ?`
+    ).get(now, projectId).cnt;
 
-  // Average time to complete (seconds from createdAt to move-to-done activity, scoped to project)
-  const completionRows = db.prepare(`
-    SELECT t.createdAt as taskCreated, MIN(a.createdAt) as doneAt
-    FROM tasks t
-    INNER JOIN card_activity a ON a.taskId = t.id AND a.type = 'move' AND a.content LIKE '%→ Done%'
-    WHERE t."column" = 'done' AND t.projectId = ?
-    GROUP BY t.id
-  `).all(projectId);
-  let avgTimeToComplete = 0;
-  if (completionRows.length > 0) {
-    const totalSec = completionRows.reduce((sum, r) => {
-      return sum + (new Date(r.doneAt).getTime() - new Date(r.taskCreated).getTime()) / 1000;
-    }, 0);
-    avgTimeToComplete = Math.round(totalSec / completionRows.length);
+    // Average time to complete (seconds from createdAt to move-to-done activity, scoped to project)
+    const completionRows = db.prepare(`
+      SELECT t.createdAt as taskCreated, MIN(a.createdAt) as doneAt
+      FROM tasks t
+      INNER JOIN card_activity a ON a.taskId = t.id AND a.type = 'move' AND a.content LIKE '%→ Done%'
+      WHERE t."column" = 'done' AND t.projectId = ?
+      GROUP BY t.id
+    `).all(projectId);
+    let avgTimeToComplete = 0;
+    if (completionRows.length > 0) {
+      const totalSec = completionRows.reduce((sum, r) => {
+        return sum + (new Date(r.doneAt).getTime() - new Date(r.taskCreated).getTime()) / 1000;
+      }, 0);
+      avgTimeToComplete = Math.round(totalSec / completionRows.length);
+    }
+
+    res.json({ projectId, projectName, totalByAssignee, completedThisWeek, overdueCount, columnCounts, avgTimeToComplete });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Internal server error" });
   }
-
-  res.json({ projectId, projectName, totalByAssignee, completedThisWeek, overdueCount, columnCounts, avgTimeToComplete });
 });
 
 // ─── Startup: seed default 'agent-task' template for projects that have none ──
