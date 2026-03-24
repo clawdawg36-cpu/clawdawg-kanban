@@ -3861,10 +3861,10 @@ function cardHTML(t, q) {
     ${waveBadge}
     ${agentBadge}
     ${t.column !== 'done' && t.dueDate ? dueBadgeHTML(t.dueDate) : ''}
-    ${t.recurring ? `<div class="recurring-badge">🔄 ${t.recurring}</div>` : ''}
+    ${t.recurring ? `<div class="recurring-badge">🔄 ${esc(t.recurring)}</div>` : ''}
     ${subtaskProgressHTML}
     <div class="card-meta">
-      <span class="card-assignee"><span class="avatar ${avatarClass}">${initials}</span>${t.assignee}</span>
+      <span class="card-assignee"><span class="avatar ${avatarClass}">${initials}</span>${esc(t.assignee)}</span>
       <span class="card-date">${date}</span>
     </div>
     <div class="card-move-actions">${moveBtns}</div>
@@ -3875,6 +3875,11 @@ function esc(s) {
   const d = document.createElement('div');
   d.textContent = s;
   return d.innerHTML;
+}
+
+// escapeHtml: safe HTML escaping for user-supplied data in innerHTML contexts
+function escapeHtml(str) {
+  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
 
 // ─── Bulk Selection ────────────────────────────────────────────────────────────

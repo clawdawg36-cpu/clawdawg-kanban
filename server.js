@@ -4,6 +4,7 @@ const fs = require('fs');
 const multer = require('multer');
 const helmet = require('helmet');
 const cors = require('cors');
+const { rateLimit } = require('express-rate-limit');
 const db = require('./db');
 
 // ─── Multer config for file uploads ──────────────────────────────────────────
@@ -88,6 +89,47 @@ app.use('/api', (req, res, next) => {
   if (auth !== `Bearer ${token}`) return res.status(401).json({ error: 'Unauthorized' });
   next();
 });
+
+// ─── Rate Limiting ────────────────────────────────────────────────────────────
+
+// General limiter: 300 req/min per IP on all /api/* routes
+const generalApiLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 300,
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: (req, res) => res.status(429).json({ error: 'Too many requests' }),
+});
+
+// Strict write limiter: 60 req/min per IP (POST/PUT/DELETE), skips log endpoint
+const writeLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: (req) => /^\/tasks\/[^\/]+\/logs$/.test(req.path),
+  handler: (req, res) => res.status(429).json({ error: 'Too many requests' }),
+});
+
+// Log limiter: 120 req/min per IP for /api/tasks/:id/logs (agent log spam)
+const logLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 120,
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: (req, res) => res.status(429).json({ error: 'Too many requests' }),
+});
+
+// Apply general limiter to all /api/* routes
+app.use('/api', generalApiLimiter);
+
+// Apply write limiter to all POST/PUT/DELETE on /api/* (skips log endpoint)
+app.post('/api/*splat', writeLimiter);
+app.put('/api/*splat', writeLimiter);
+app.delete('/api/*splat', writeLimiter);
+
+// Apply dedicated log limiter to POST /api/tasks/:id/logs (120/min)
+app.post('/api/tasks/:id/logs', logLimiter);
 
 // ─── Webhook event emitter ────────────────────────────────────────────────────
 const https = require('https');
@@ -1376,7 +1418,7 @@ Send a BlueBubbles message to +18183121807:
 // Run immediately at startup to clear any expired locks from a prior run,
 // then repeat every 60 seconds. Keeps GET /api/tasks read-only.
 const expireStaleLocksStmt = db.prepare(
-  "UPDATE tasks SET lockedBy=NULL,lockedAt=NULL,lockExpiresAt=NULL WHERE lockExpiresAt IS NOT NULL AND lockExpiresAt < datetime(\"now\")"
+  "UPDATE tasks SET lockedBy=NULL,lockedAt=NULL,lockExpiresAt=NULL WHERE lockExpiresAt IS NOT NULL AND lockExpiresAt < datetime('now')"
 );
 expireStaleLocksStmt.run(); // clear on startup
 setInterval(() => {
