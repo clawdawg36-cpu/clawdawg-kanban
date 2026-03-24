@@ -69,6 +69,54 @@ app.use('/api', (req, res, next) => {
 const https = require('https');
 const http = require('http');
 const crypto = require('crypto');
+const dns = require('dns');
+
+// Check if an IP address is a private/loopback address (SSRF protection)
+function isPrivateIp(ip) {
+  // IPv6 loopback
+  if (ip === '::1' || ip === '0:0:0:0:0:0:0:1') return true;
+  // Strip IPv6-mapped IPv4 prefix (::ffff:x.x.x.x)
+  const ipv4 = ip.startsWith('::ffff:') ? ip.slice(7) : ip;
+  const parts = ipv4.split('.').map(Number);
+  if (parts.length !== 4) return false; // not IPv4, allow (IPv6 addresses not RFC-1918)
+  const [a, b] = parts;
+  return (
+    a === 10 ||                          // 10.0.0.0/8
+    a === 127 ||                         // 127.0.0.0/8 loopback
+    a === 169 && b === 254 ||            // 169.254.0.0/16 link-local (cloud metadata)
+    a === 172 && b >= 16 && b <= 31 ||   // 172.16.0.0/12
+    a === 192 && b === 168              // 192.168.0.0/16
+  );
+}
+
+// Validate a webhook URL: must be https and not target private/loopback IPs.
+// Returns null if valid, or an error string if invalid.
+async function validateWebhookUrl(rawUrl) {
+  let parsed;
+  try {
+    parsed = new URL(rawUrl);
+  } catch (e) {
+    return 'Invalid URL';
+  }
+  if (parsed.protocol !== 'https:') {
+    return 'Webhook URL must use https://';
+  }
+  // Resolve hostname and check for private IPs
+  const hostname = parsed.hostname;
+  return new Promise((resolve) => {
+    dns.lookup(hostname, { all: true }, (err, addresses) => {
+      if (err || !addresses || addresses.length === 0) {
+        return resolve('Could not resolve webhook hostname');
+      }
+      for (const { address } of addresses) {
+        if (isPrivateIp(address)) {
+          return resolve(`Webhook URL resolves to a disallowed private/loopback address (${address})`);
+        }
+      }
+      resolve(null);
+    });
+  });
+}
 
 function fireWebhook(projectId, eventType, payload) {
   const hooks = db.prepare("SELECT * FROM webhooks WHERE projectId = ? AND (events = '[]' OR events LIKE ?)").all(projectId, `%"${eventType}"%`);
@@ -77,18 +125,27 @@ function fireWebhook(projectId, eventType, payload) {
     const sig = hook.secret ? 'sha256=' + crypto.createHmac('sha256', hook.secret).update(body).digest('hex') : null;
     try {
       const url = new URL(hook.url);
-      const lib = url.protocol === 'https:' ? https : http;
-      const options = {
-        hostname: url.hostname,
-        port: url.port || (url.protocol === 'https:' ? 443 : 80),
-        path: url.pathname + url.search,
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body), ...(sig ? { 'X-Webhook-Signature': sig } : {}) },
-      };
-      const req = lib.request(options);
-      req.on('error', () => {}); // fire-and-forget
-      req.write(body);
-      req.end();
+      // Only fire over https (skip any http hooks that may have been stored before this fix)
+      if (url.protocol !== 'https:') continue;
+      // Resolve and check for private IPs before firing
+      dns.lookup(url.hostname, { all: true }, (err, addresses) => {
+        if (err || !addresses || addresses.length === 0) return;
+        for (const { address } of addresses) {
+          if (isPrivateIp(address)) return; // silently drop SSRF-risk hooks
+        }
+        const options = {
+          hostname: url.hostname,
+          port: url.port || 443,
+          path: url.pathname + url.search,
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body), ...(sig ? { 'X-Webhook-Signature': sig } : {}) },
+        };
+        const req = https.request(options);
+        req.setTimeout(5000, () => req.destroy());
+        req.on('error', () => {}); // fire-and-forget
+        req.write(body);
+        req.end();
+      });
     } catch(e) { /* ignore bad URLs */ }
   }
 }
@@ -274,10 +331,15 @@ app.post('/api/tasks/:id/claim', (req, res) => {
 // POST /api/tasks/:id/release — release a lock
 app.post('/api/tasks/:id/release', (req, res) => {
   try {
+    const agentSessionId = req.body.agentSessionId;
+    if (!agentSessionId || typeof agentSessionId !== 'string' || agentSessionId.trim() === '') {
+      return res.status(400).json({ error: 'agentSessionId is required and must be a non-empty string' });
+    }
+
     const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id);
     if (!task) return res.status(404).json({ error: 'Not found' });
 
-    if (task.lockedBy !== req.body.agentSessionId) {
+    if (task.lockedBy !== agentSessionId) {
       return res.status(403).json({ error: 'Not the lock owner' });
     }
 
