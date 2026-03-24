@@ -61,6 +61,7 @@ app.use(helmet({
     directives: {
       defaultSrc: ["'self'"],
       scriptSrc: ["'self'", "'unsafe-inline'"],   // allow inline scripts for the Kanban UI
+      scriptSrcAttr: ["'unsafe-inline'"],          // allow inline onclick/onchange handlers
       styleSrc:  ["'self'", "'unsafe-inline'"],   // allow inline styles
       imgSrc:    ["'self'", "data:", "blob:"],
       connectSrc: ["'self'"],
