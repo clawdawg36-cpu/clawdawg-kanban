@@ -890,7 +890,7 @@ app.get('/api/webhooks', (req, res) => {
   }
 });
 
-app.post('/api/webhooks', (req, res) => {
+app.post('/api/webhooks', async (req, res) => {
   try {
     const hook = {
       id: Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
@@ -901,6 +901,9 @@ app.post('/api/webhooks', (req, res) => {
       createdAt: new Date().toISOString(),
     };
     if (!hook.url) return res.status(400).json({ error: 'url required' });
+    // Validate the URL: must be https and not target private/loopback IPs (SSRF protection)
+    const urlError = await validateWebhookUrl(hook.url);
+    if (urlError) return res.status(400).json({ error: urlError });
     db.prepare('INSERT INTO webhooks (id, projectId, url, events, secret, createdAt) VALUES (?, ?, ?, ?, ?, ?)')
       .run(hook.id, hook.projectId, hook.url, JSON.stringify(hook.events), hook.secret, hook.createdAt);
     res.status(201).json({ ...hook });
