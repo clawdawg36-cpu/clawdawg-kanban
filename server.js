@@ -54,6 +54,17 @@ const COL_LABELS = { 'backlog': 'Backlog', 'in-progress': 'In Progress', 'in-rev
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
+// ─── API authentication (bearer token) ───────────────────────────────────────
+// Set KANBAN_API_KEY env var to require Bearer auth on all /api/* routes.
+// If KANBAN_API_KEY is unset, the API remains open (backward-compatible).
+app.use('/api', (req, res, next) => {
+  const token = process.env.KANBAN_API_KEY;
+  if (!token) return next(); // no key configured = open mode
+  const auth = req.headers.authorization || '';
+  if (auth !== `Bearer ${token}`) return res.status(401).json({ error: 'Unauthorized' });
+  next();
+});
+
 // ─── Webhook event emitter ────────────────────────────────────────────────────
 const https = require('https');
 const http = require('http');
@@ -355,12 +366,15 @@ app.put('/api/tasks/:id', (req, res) => {
     updated.blockedBy = existing.blockedBy ? JSON.parse(existing.blockedBy) : [];
   }
 
-  // Handle wave field explicitly
-  updated.wave = req.body.wave !== undefined ? req.body.wave : (existing.wave !== undefined ? existing.wave : null);
+  // Preserve lock/agent fields from existing — never overwrite from req.body
+  updated.lockedBy = existing.lockedBy || null;
+  updated.lockedAt = existing.lockedAt || null;
+  updated.lockExpiresAt = existing.lockExpiresAt || null;
+  updated.agentSessionId = existing.agentSessionId || null;
+  updated.agentStartedAt = existing.agentStartedAt || null;
 
-  // Handle agentSessionId and agentStartedAt
-  updated.agentSessionId = req.body.agentSessionId !== undefined ? req.body.agentSessionId || null : (existing.agentSessionId || null);
-  updated.agentStartedAt = req.body.agentStartedAt !== undefined ? req.body.agentStartedAt || null : (existing.agentStartedAt || null);
+  // Handle wave field — use clientUpdate value if provided, else keep existing
+  updated.wave = clientUpdate.wave !== undefined ? clientUpdate.wave : (existing.wave !== undefined ? existing.wave : null);
 
   db.prepare(
     'UPDATE tasks SET title = ?, description = ?, assignee = ?, priority = ?, tags = ?, "column" = ?, dueDate = ?, recurring = ?, subtasks = ?, projectId = ?, blockedBy = ?, wave = ?, agentSessionId = ?, agentStartedAt = ? WHERE id = ?'
@@ -711,8 +725,34 @@ app.delete('/api/tasks/:id/blockers/:blocker_id', (req, res) => {
 
 // ─── File Attachments ─────────────────────────────────────────────────────────
 
-// Serve uploaded files
-app.use('/uploads', express.static(UPLOADS_DIR));
+// Serve uploaded files via controlled route (NOT express.static — prevents stored XSS)
+app.get('/uploads/:filename', (req, res) => {
+  // Validate filename: no path traversal, only alphanumeric + safe chars
+  const filename = req.params.filename;
+  if (!filename || /[/\\]/.test(filename)) {
+    return res.status(400).json({ error: 'Invalid filename' });
+  }
+
+  const resolvedPath = path.resolve(path.join(UPLOADS_DIR, filename));
+  // Ensure resolved path is strictly within UPLOADS_DIR
+  if (!resolvedPath.startsWith(UPLOADS_DIR + path.sep) && resolvedPath !== UPLOADS_DIR) {
+    return res.status(403).json({ error: 'Access denied' });
+  }
+
+  // Look up attachment in DB to get original_name and trusted mimetype
+  const row = db.prepare('SELECT * FROM attachments WHERE filename = ?').get(filename);
+  if (!row) return res.status(404).json({ error: 'Not found' });
+
+  if (!fs.existsSync(resolvedPath)) return res.status(404).json({ error: 'File not found on disk' });
+
+  // Force download with original name; use DB-stored mimetype (not user-supplied)
+  res.setHeader('Content-Type', row.mimetype);
+  res.setHeader('Content-Disposition', `attachment; filename="${row.original_name.replace(/"/g, '\\"')}"`);
+  // Prevent browser from executing content even if content-type is wrong
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+
+  fs.createReadStream(resolvedPath).pipe(res);
+});
 
 // GET /api/tasks/:id/attachments — list attachments for a task
 app.get('/api/tasks/:id/attachments', (req, res) => {
@@ -721,7 +761,15 @@ app.get('/api/tasks/:id/attachments', (req, res) => {
 });
 
 // POST /api/tasks/:id/attachments — upload a file
-app.post('/api/tasks/:id/attachments', upload.single('file'), (req, res) => {
+app.post('/api/tasks/:id/attachments', (req, res, next) => {
+  upload.single('file')(req, res, (err) => {
+    if (err) {
+      const status = err.status || (err.code === 'LIMIT_FILE_SIZE' ? 413 : 400);
+      return res.status(status).json({ error: err.message });
+    }
+    next();
+  });
+}, (req, res) => {
   const task = db.prepare('SELECT id FROM tasks WHERE id = ?').get(req.params.id);
   if (!task) return res.status(404).json({ error: 'Task not found' });
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
@@ -755,8 +803,14 @@ app.delete('/api/attachments/:id', (req, res) => {
   const row = db.prepare('SELECT * FROM attachments WHERE id = ?').get(req.params.id);
   if (!row) return res.status(404).json({ error: 'Not found' });
 
+  // Reconstruct path from UPLOADS_DIR + filename (NOT from DB-stored path field — path traversal risk)
+  const safePath = path.resolve(path.join(UPLOADS_DIR, row.filename));
+  if (!safePath.startsWith(UPLOADS_DIR + path.sep) && safePath !== UPLOADS_DIR) {
+    return res.status(403).json({ error: 'Access denied' });
+  }
+
   // Delete file from disk
-  try { fs.unlinkSync(row.path); } catch (e) { /* ignore if already gone */ }
+  try { fs.unlinkSync(safePath); } catch (e) { /* ignore if already gone */ }
 
   db.prepare('DELETE FROM attachments WHERE id = ?').run(req.params.id);
   res.status(204).end();
@@ -899,6 +953,6 @@ Send a BlueBubbles message to +18183121807:
   }
 })();
 
-app.listen(PORT, () => {
-  console.log(`Kanban board running at http://localhost:${PORT}`);
+app.listen(PORT, '127.0.0.1', () => {
+  console.log(`Kanban board running at http://127.0.0.1:${PORT}`);
 });
