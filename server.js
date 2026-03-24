@@ -592,15 +592,33 @@ app.get('/api/tasks', (req, res) => {
       rows = rows.filter(row => computeAgentStatus(row) === wantStatus);
     }
 
-    res.json(rows.map(row => ({
-      ...row,
-      tags: JSON.parse(row.tags),
-      subtasks: row.subtasks ? JSON.parse(row.subtasks) : null,
-      blockedBy: row.blockedBy ? JSON.parse(row.blockedBy) : [],
-      blocked: computeBlocked(row),
-      handoffLog: row.handoffLog ? JSON.parse(row.handoffLog) : [],
-      agentStatus: computeAgentStatus(row),
-    })));
+    // Fetch all handoff_log rows for the returned tasks in one query (avoid N+1)
+    const taskIds = rows.map(r => r.id);
+    let handoffByTaskId = {};
+    if (taskIds.length > 0) {
+      const placeholders = taskIds.map(() => '?').join(', ');
+      const handoffRows = db.prepare(`SELECT * FROM handoff_log WHERE taskId IN (${placeholders}) ORDER BY timestamp ASC`).all(...taskIds);
+      for (const h of handoffRows) {
+        if (!handoffByTaskId[h.taskId]) handoffByTaskId[h.taskId] = [];
+        handoffByTaskId[h.taskId].push(h);
+      }
+    }
+
+    res.json(rows.map(row => {
+      // Use new table rows if present, fall back to legacy JSON blob
+      const handoffLog = handoffByTaskId[row.id]
+        ? handoffByTaskId[row.id]
+        : (row.handoffLog ? JSON.parse(row.handoffLog) : []);
+      return {
+        ...row,
+        tags: JSON.parse(row.tags),
+        subtasks: row.subtasks ? JSON.parse(row.subtasks) : null,
+        blockedBy: row.blockedBy ? JSON.parse(row.blockedBy) : [],
+        blocked: computeBlocked(row),
+        handoffLog,
+        agentStatus: computeAgentStatus(row),
+      };
+    }));
   } catch (err) {
     console.error('GET /api/tasks error:', err);
     res.status(500).json({ error: 'Internal server error' });
@@ -735,12 +753,16 @@ app.post('/api/tasks/claim-next', (req, res) => {
       return res.status(204).end();
     }
 
+    const claimedHandoffRows = db.prepare('SELECT * FROM handoff_log WHERE taskId = ? ORDER BY timestamp ASC').all(claimed.id);
+    const claimedHandoffLog = claimedHandoffRows.length > 0
+      ? claimedHandoffRows
+      : (claimed.handoffLog ? JSON.parse(claimed.handoffLog) : []);
     res.json({
       ...claimed,
       tags: JSON.parse(claimed.tags),
       subtasks: claimed.subtasks ? JSON.parse(claimed.subtasks) : null,
       blockedBy: claimed.blockedBy ? JSON.parse(claimed.blockedBy) : [],
-      handoffLog: claimed.handoffLog ? JSON.parse(claimed.handoffLog) : [],
+      handoffLog: claimedHandoffLog,
     });
   } catch (err) {
     console.error('POST /api/tasks/claim-next error:', err);
@@ -1695,7 +1717,60 @@ app.get('/api/stats', (req, res) => {
       avgTimeToComplete = Math.round(totalSec / completionRows.length);
     }
 
-    res.json({ projectId, projectName, totalByAssignee, completedThisWeek, overdueCount, columnCounts, avgTimeToComplete });
+    // Agent activity metrics
+    const nowIso = new Date().toISOString();
+    const agentActive = db.prepare(
+      `SELECT COUNT(*) as cnt FROM tasks WHERE projectId = ? AND lockedBy IS NOT NULL AND lockExpiresAt >= ?`
+    ).get(projectId, nowIso).cnt;
+
+    const agentExpiredLocks = db.prepare(
+      `SELECT COUNT(*) as cnt FROM tasks WHERE projectId = ? AND lockedBy IS NOT NULL AND lockExpiresAt < ?`
+    ).get(projectId, nowIso).cnt;
+
+    // blockedCount: tasks where at least one blockedBy dep is not done, and task itself is not done
+    const allNonDone = db.prepare(
+      `SELECT id, blockedBy FROM tasks WHERE projectId = ? AND "column" != 'done'`
+    ).all(projectId);
+    const doneIdSet = new Set(
+      db.prepare(`SELECT id FROM tasks WHERE projectId = ? AND "column" = 'done'`).all(projectId).map(r => r.id)
+    );
+    let blockedCount = 0;
+    for (const t of allNonDone) {
+      const deps = t.blockedBy ? JSON.parse(t.blockedBy) : [];
+      if (deps.some(id => !doneIdSet.has(id))) blockedCount++;
+    }
+
+    // waveProgress: per-wave breakdown
+    const waveRows = db.prepare(
+      `SELECT wave, "column", COUNT(*) as cnt FROM tasks WHERE projectId = ? GROUP BY wave, "column"`
+    ).all(projectId);
+    const waveMap = new Map();
+    for (const row of waveRows) {
+      const key = row.wave === null || row.wave === undefined ? null : row.wave;
+      if (!waveMap.has(key)) waveMap.set(key, { wave: key, total: 0, done: 0 });
+      const entry = waveMap.get(key);
+      entry.total += row.cnt;
+      if (row.column === 'done') entry.done += row.cnt;
+    }
+    const waveProgress = Array.from(waveMap.values())
+      .filter(w => w.wave !== null)
+      .sort((a, b) => a.wave - b.wave)
+      .map(w => ({ wave: w.wave, total: w.total, done: w.done, pct: w.total > 0 ? Math.round((w.done / w.total) * 100) : 0 }));
+
+    // completedByAgent: tasks completed this week, grouped by agentSessionId
+    const completedByAgentRows = db.prepare(
+      `SELECT t.agentSessionId, COUNT(DISTINCT a.taskId) as cnt
+       FROM card_activity a
+       INNER JOIN tasks t ON t.id = a.taskId
+       WHERE a.type = 'move' AND a.content LIKE '%→ Done%' AND a.createdAt >= ? AND t.projectId = ? AND t.agentSessionId IS NOT NULL
+       GROUP BY t.agentSessionId`
+    ).all(weekAgo, projectId);
+    const completedByAgent = completedByAgentRows.map(r => ({ agentSessionId: r.agentSessionId, count: r.cnt }));
+
+    res.json({
+      projectId, projectName, totalByAssignee, completedThisWeek, overdueCount, columnCounts,
+      avgTimeToComplete, agentActive, agentExpiredLocks, blockedCount, waveProgress, completedByAgent
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Internal server error" });
