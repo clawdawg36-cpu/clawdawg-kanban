@@ -57,6 +57,9 @@ const VALID_COLUMNS = ['idea', 'backlog', 'in-progress', 'in-review', 'done'];
 const MAX_AGENT_LOG_MESSAGE_BYTES = 10 * 1024;
 const SAFE_AGENT_MODEL_REGEX = /^[a-zA-Z0-9/_.-]+$/;
 const MAX_SPAWN_TASK_DESCRIPTION_LENGTH = 4000;
+
+// In-memory registry of spawned agent processes (taskId → { pid, sessionKey, startTime })
+const agentProcesses = new Map();
 const DEFAULT_TEMPLATE_SUBAGENTS_PATH_TOKEN = '{{KANBAN_SUBAGENTS_PATH}}';
 const DEFAULT_TEMPLATE_AGENT_PHONE_TOKEN = '{{KANBAN_AGENT_PHONE}}';
 const DEFAULT_TEMPLATE_SUBAGENTS_PATH = process.env.KANBAN_SUBAGENTS_PATH || DEFAULT_TEMPLATE_SUBAGENTS_PATH_TOKEN;
@@ -1499,6 +1502,21 @@ app.post('/api/tasks/:id/spawn', async (req, res) => {
     });
     child.unref();
 
+    // Track the spawned process in the in-memory registry
+    agentProcesses.set(task.id, {
+      pid: child.pid,
+      sessionKey,
+      startTime: now.toISOString(),
+    });
+
+    // Clean up registry entry when process exits
+    child.on('exit', () => {
+      const entry = agentProcesses.get(task.id);
+      if (entry && entry.pid === child.pid) {
+        agentProcesses.delete(task.id);
+      }
+    });
+
     // Lock the card and store agent session ID
     const expiresAt = getTaskLockExpiryIso(project);
     const nowIso = now.toISOString();
@@ -1516,6 +1534,98 @@ app.post('/api/tasks/:id/spawn', async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// GET /api/tasks/:id/agent-process — check if a spawned agent process is alive
+app.get('/api/tasks/:id/agent-process', (req, res) => {
+  try {
+    const task = db.prepare('SELECT id, lockedBy, lockExpiresAt, agentSessionId, agentStartedAt FROM tasks WHERE id = ?').get(req.params.id);
+    if (!task) return res.status(404).json({ error: 'Not found' });
+
+    const entry = agentProcesses.get(task.id);
+    if (!entry) {
+      return res.json({
+        taskId: task.id,
+        tracked: false,
+        alive: false,
+        lockedBy: task.lockedBy || null,
+        lockExpiresAt: task.lockExpiresAt || null,
+        agentSessionId: task.agentSessionId || null,
+        agentStartedAt: task.agentStartedAt || null,
+      });
+    }
+
+    // Check if process is still alive
+    let alive = false;
+    try {
+      process.kill(entry.pid, 0); // signal 0 = test existence
+      alive = true;
+    } catch (e) {
+      // Process not found — clean up registry
+      agentProcesses.delete(task.id);
+    }
+
+    res.json({
+      taskId: task.id,
+      tracked: true,
+      alive,
+      pid: entry.pid,
+      sessionKey: entry.sessionKey,
+      startTime: entry.startTime,
+      lockedBy: task.lockedBy || null,
+      lockExpiresAt: task.lockExpiresAt || null,
+      agentSessionId: task.agentSessionId || null,
+      agentStartedAt: task.agentStartedAt || null,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// DELETE /api/tasks/:id/agent-process — kill a spawned agent process and release the lock
+app.delete('/api/tasks/:id/agent-process', (req, res) => {
+  try {
+    const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id);
+    if (!task) return res.status(404).json({ error: 'Not found' });
+
+    const entry = agentProcesses.get(task.id);
+    if (!entry) {
+      return res.status(404).json({ error: 'No tracked agent process for this task' });
+    }
+
+    // Kill the process
+    let killed = false;
+    try {
+      process.kill(entry.pid, 'SIGTERM');
+      killed = true;
+    } catch (e) {
+      // Already dead — that's fine
+    }
+
+    // Remove from registry
+    agentProcesses.delete(task.id);
+
+    // Release the lock on the card
+    db.prepare('UPDATE tasks SET lockedBy = NULL, lockedAt = NULL, lockExpiresAt = NULL WHERE id = ?')
+      .run(task.id);
+
+    writeAuditLog(req, 'task.agent-process.kill', task.id, {
+      pid: entry.pid,
+      sessionKey: entry.sessionKey,
+      killed,
+    });
+
+    res.json({
+      taskId: task.id,
+      pid: entry.pid,
+      killed,
+      lockReleased: true,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
