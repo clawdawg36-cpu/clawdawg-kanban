@@ -31,7 +31,17 @@ app.use(express.static(path.join(__dirname, 'public')));
 // GET /api/projects — list all projects
 app.get('/api/projects', (req, res) => {
   const rows = db.prepare('SELECT * FROM projects ORDER BY createdAt ASC').all();
-  res.json(rows);
+  res.json(rows.map(r => ({
+    ...r,
+    agentConfig: r.agentConfig ? JSON.parse(r.agentConfig) : null
+  })));
+});
+
+// GET /api/projects/:id — single project
+app.get('/api/projects/:id', (req, res) => {
+  const row = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'Not found' });
+  res.json({ ...row, agentConfig: row.agentConfig ? JSON.parse(row.agentConfig) : null });
 });
 
 // POST /api/projects — create a project
@@ -67,10 +77,11 @@ app.put('/api/projects/:id', (req, res) => {
     name: req.body.name !== undefined ? req.body.name : existing.name,
     color: req.body.color !== undefined ? req.body.color : existing.color,
     emoji: req.body.emoji !== undefined ? req.body.emoji : existing.emoji,
+    agentConfig: req.body.agentConfig !== undefined ? JSON.stringify(req.body.agentConfig) : existing.agentConfig,
   };
-  db.prepare('UPDATE projects SET name = ?, color = ?, emoji = ? WHERE id = ?')
-    .run(updated.name, updated.color, updated.emoji, req.params.id);
-  res.json({ ...existing, ...updated });
+  db.prepare('UPDATE projects SET name = ?, color = ?, emoji = ?, agentConfig = ? WHERE id = ?')
+    .run(updated.name, updated.color, updated.emoji, updated.agentConfig, req.params.id);
+  res.json({ ...existing, ...updated, agentConfig: updated.agentConfig ? JSON.parse(updated.agentConfig) : null });
 });
 
 // DELETE /api/projects/:id — delete project and cascade tasks

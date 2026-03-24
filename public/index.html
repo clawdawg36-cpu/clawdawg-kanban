@@ -2543,6 +2543,21 @@ input[type="date"] {
         <div class="emoji-option" data-emoji="⭐">⭐</div>
       </div>
     </div>
+    <div class="field" id="agentConfigSection">
+      <label>🤖 Agent Config (optional JSON)</label>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <div style="display:flex;gap:8px">
+          <div style="flex:1">
+            <label style="font-size:11px;color:var(--text-dim);margin-bottom:4px;display:block">Model override</label>
+            <input type="text" id="agentModel" placeholder="e.g. anthropic/claude-sonnet-4-5" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-family:inherit;font-size:13px;outline:none;">
+          </div>
+          <div style="flex:1">
+            <label style="font-size:11px;color:var(--text-dim);margin-bottom:4px;display:block">Timeout (seconds)</label>
+            <input type="number" id="agentTimeout" placeholder="300" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-family:inherit;font-size:13px;outline:none;">
+          </div>
+        </div>
+      </div>
+    </div>
     <div class="modal-actions">
       <button class="btn-cancel" onclick="closeProjectModal()">Cancel</button>
       <button class="btn-save" onclick="saveProject()">Save Project</button>
@@ -3795,6 +3810,11 @@ function openProjectModal(project) {
     o.classList.toggle('selected', o.dataset.emoji === selectedProjectEmoji);
   });
 
+  // Agent config
+  const cfg = project && project.agentConfig ? project.agentConfig : {};
+  document.getElementById('agentModel').value = cfg.model || '';
+  document.getElementById('agentTimeout').value = cfg.timeoutSeconds || '';
+
   modal.classList.add('open');
   setTimeout(() => document.getElementById('pName').focus(), 100);
 }
@@ -3808,7 +3828,13 @@ async function saveProject() {
   const name = document.getElementById('pName').value.trim();
   if (!name) { document.getElementById('pName').focus(); return; }
 
-  const data = { name, color: selectedProjectColor, emoji: selectedProjectEmoji };
+  const agentModel = document.getElementById('agentModel').value.trim();
+  const agentTimeout = document.getElementById('agentTimeout').value;
+  const agentConfig = (agentModel || agentTimeout) ? {
+    model: agentModel || undefined,
+    timeoutSeconds: agentTimeout ? parseInt(agentTimeout) : undefined,
+  } : null;
+  const data = { name, color: selectedProjectColor, emoji: selectedProjectEmoji, agentConfig };
 
   if (id) {
     await fetch(`/api/projects/${id}`, {

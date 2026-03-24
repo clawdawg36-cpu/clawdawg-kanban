@@ -157,6 +157,13 @@ db.exec(`
   )
 `);
 
+// Migrate: add agentConfig column to projects if it doesn't exist
+const projCols = db.prepare("PRAGMA table_info(projects)").all().map(c => c.name);
+if (!projCols.includes('agentConfig')) {
+  db.exec("ALTER TABLE projects ADD COLUMN agentConfig TEXT DEFAULT NULL");
+  console.log('Migrated: added agentConfig column to projects table');
+}
+
 // Notifications table
 db.exec(`
   CREATE TABLE IF NOT EXISTS notifications (
