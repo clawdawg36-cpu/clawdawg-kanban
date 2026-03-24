@@ -1126,6 +1126,9 @@ app.post('/api/tasks', (req, res) => {
       'INSERT INTO card_activity (id, taskId, type, content, author, createdAt) VALUES (?, ?, ?, ?, ?, ?)'
     ).run(actId, task.id, 'created', `Card created in ${COL_LABELS[task.column] || task.column}`, task.assignee, task.createdAt);
 
+    // Fan-out SSE event to connected clients for this project
+    sseBroadcast(task.projectId, 'task.created', { task });
+
     res.status(201).json(task);
   } catch (err) {
     console.error(err);
@@ -2014,6 +2017,35 @@ app.get('/api/stats', (req, res) => {
     console.error(err);
     res.status(500).json({ error: "Internal server error" });
   }
+});
+
+// ─── Server-Sent Events ───────────────────────────────────────────────────────
+// GET /api/events?projectId=X
+// Streams task.created, task.updated, task.deleted, and log.created events
+// to connected clients so the board can update in real-time without polling.
+app.get('/api/events', (req, res) => {
+  const projectId = req.query.projectId || 'default';
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no'); // disable nginx proxy buffering
+  res.flushHeaders();
+
+  // Send a heartbeat comment every 25s to keep the connection alive through proxies
+  const heartbeat = setInterval(() => {
+    try { res.write(': heartbeat\n\n'); } catch(e) { /* ignore */ }
+  }, 25000);
+
+  sseSubscribe(projectId, res);
+
+  // Immediately send a 'connected' event so the client knows the stream is live
+  res.write(`event: connected\ndata: ${JSON.stringify({ projectId, ts: new Date().toISOString() })}\n\n`);
+
+  req.on('close', () => {
+    clearInterval(heartbeat);
+    sseUnsubscribe(projectId, res);
+  });
 });
 
 // ─── Health Check ─────────────────────────────────────────────────────────────
