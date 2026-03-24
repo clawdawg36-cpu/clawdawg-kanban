@@ -1676,6 +1676,11 @@ app.post('/api/tasks/bulk', (req, res) => {
     if (action === 'delete') {
       const results = [];
 
+      // Collect unique projectIds before deletion
+      const placeholders = ids.map(() => '?').join(',');
+      const tasksToDelete = db.prepare(`SELECT DISTINCT projectId FROM tasks WHERE id IN (${placeholders})`).all(...ids);
+      const projectIds = new Set(tasksToDelete.map(t => t.projectId || 'default'));
+
       const bulkDelete = db.transaction(() => {
         for (const id of ids) {
           const task = db.prepare('SELECT id, projectId FROM tasks WHERE id = ?').get(id);
@@ -1694,8 +1699,7 @@ app.post('/api/tasks/bulk', (req, res) => {
       });
       bulkDelete();
 
-      // SSE broadcast
-      const projectIds = new Set(ids.map(() => 'default'));
+      // SSE broadcast per unique projectId
       for (const pid of projectIds) {
         sseBroadcast(pid, 'task.deleted', { bulkDelete: true, ids });
       }
