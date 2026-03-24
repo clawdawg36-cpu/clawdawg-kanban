@@ -8,15 +8,41 @@ const db = require('./db');
 const UPLOADS_DIR = path.join(__dirname, 'uploads');
 if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 
+const ALLOWED_MIMETYPES = [
+  'image/jpeg', 'image/png', 'image/gif', 'image/webp',
+  'application/pdf', 'text/plain',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document', // docx
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',       // xlsx
+  'application/zip',
+];
+
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, UPLOADS_DIR),
   filename: (req, file, cb) => {
     const unique = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
-    const ext = path.extname(file.originalname);
+    // Use a safe extension derived from the allowlist mimetype, not user-supplied filename
+    const safeExts = {
+      'image/jpeg': '.jpg', 'image/png': '.png', 'image/gif': '.gif', 'image/webp': '.webp',
+      'application/pdf': '.pdf', 'text/plain': '.txt',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document': '.docx',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': '.xlsx',
+      'application/zip': '.zip',
+    };
+    const ext = safeExts[file.mimetype] || '';
     cb(null, unique + ext);
   }
 });
-const upload = multer({ storage, limits: { fileSize: 50 * 1024 * 1024 } }); // 50MB limit
+const upload = multer({
+  storage,
+  limits: { fileSize: 50 * 1024 * 1024 }, // 50MB limit
+  fileFilter: (req, file, cb) => {
+    if (ALLOWED_MIMETYPES.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(Object.assign(new Error('File type not allowed'), { status: 415 }), false);
+    }
+  },
+});
 
 process.on('unhandledRejection', (err) => console.error('Unhandled rejection:', err));
 
@@ -202,23 +228,30 @@ app.get('/api/tasks', (req, res) => {
 // POST /api/tasks/:id/claim — atomically lock a card
 app.post('/api/tasks/:id/claim', (req, res) => {
   try {
+    const { agentSessionId } = req.body;
+
+    // Validate agentSessionId — must be a non-empty string
+    if (!agentSessionId || typeof agentSessionId !== 'string' || agentSessionId.trim() === '') {
+      return res.status(400).json({ error: 'agentSessionId is required and must be a non-empty string' });
+    }
+
+    // Check task exists first
     const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id);
     if (!task) return res.status(404).json({ error: 'Not found' });
 
-    // Check if task is currently locked by someone else
-    if (task.lockedBy && task.lockExpiresAt) {
-      const expiry = db.prepare("SELECT lockExpiresAt > datetime('now') as active FROM tasks WHERE id = ?").get(req.params.id);
-      if (expiry && expiry.active) {
-        return res.status(409).json({ error: 'Task already locked', lockedBy: task.lockedBy, lockExpiresAt: task.lockExpiresAt });
-      }
-    }
-
     const now = new Date().toISOString();
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
-    const agentSessionId = req.body.agentSessionId;
 
-    db.prepare('UPDATE tasks SET lockedBy = ?, lockedAt = ?, lockExpiresAt = ?, agentSessionId = ?, agentStartedAt = ? WHERE id = ?')
-      .run(agentSessionId, now, expiresAt, agentSessionId, now, req.params.id);
+    // Atomic claim: only succeeds if task is unlocked or lock has expired
+    const result = db.prepare(
+      `UPDATE tasks SET lockedBy = ?, lockedAt = ?, lockExpiresAt = ?, agentSessionId = ?, agentStartedAt = ?
+       WHERE id = ? AND (lockedBy IS NULL OR lockExpiresAt < datetime('now'))`
+    ).run(agentSessionId, now, expiresAt, agentSessionId, now, req.params.id);
+
+    if (result.changes === 0) {
+      const current = db.prepare('SELECT lockedBy, lockExpiresAt FROM tasks WHERE id = ?').get(req.params.id);
+      return res.status(409).json({ error: 'Task already locked', lockedBy: current.lockedBy, lockExpiresAt: current.lockExpiresAt });
+    }
 
     const updated = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id);
     res.json({ ...updated, tags: JSON.parse(updated.tags), subtasks: updated.subtasks ? JSON.parse(updated.subtasks) : null });
@@ -291,11 +324,18 @@ app.put('/api/tasks/:id', (req, res) => {
   const existing = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id);
   if (!existing) return res.status(404).json({ error: 'Not found' });
 
+  // Allowlist of client-settable fields — protects lock/agent fields from mass-assignment
+  const ALLOWED_UPDATE_FIELDS = ['title', 'description', 'assignee', 'priority', 'tags', 'column', 'dueDate', 'recurring', 'subtasks', 'projectId', 'blockedBy', 'wave'];
+  const clientUpdate = {};
+  for (const field of ALLOWED_UPDATE_FIELDS) {
+    if (req.body[field] !== undefined) clientUpdate[field] = req.body[field];
+  }
+
   const updated = {
     ...existing,
     tags: JSON.parse(existing.tags),
     subtasks: existing.subtasks ? JSON.parse(existing.subtasks) : null,
-    ...req.body,
+    ...clientUpdate,
     id: existing.id,
     createdAt: existing.createdAt,
   };
