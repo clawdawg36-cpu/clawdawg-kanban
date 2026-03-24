@@ -794,7 +794,7 @@ app.get('/api/tasks', (req, res) => {
     }
 
     // Lock expiry is handled by background cleanup (see setInterval below) — no UPDATE here
-    const sql = `SELECT * FROM tasks WHERE ${conditions.join(' AND ')}`;
+    const sql = `SELECT * FROM tasks WHERE ${conditions.join(' AND ')} ORDER BY sortOrder ASC NULLS LAST, createdAt ASC`;
     let rows = db.prepare(sql).all(...params);
 
     // Compute blocked status for each task (needed for ?blocked filter and response shape)
@@ -1289,6 +1289,95 @@ app.put('/api/tasks/:id', (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Reorder tasks within a column (or across columns)
+// Body: { taskId, newIndex, column }
+// Calculates a new sortOrder for the task by placing it between the cards at (newIndex-1) and newIndex
+app.post('/api/tasks/reorder', (req, res) => {
+  try {
+    const { taskId, newIndex, column } = req.body;
+    if (!taskId || newIndex == null || !column) {
+      return res.status(400).json({ error: 'taskId, newIndex, and column are required' });
+    }
+    const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(taskId);
+    if (!task) return res.status(404).json({ error: 'Not found' });
+
+    // Fetch all tasks in the target column (ordered by sortOrder, then createdAt as tiebreaker)
+    // Exclude the dragged task itself
+    const siblings = db.prepare(
+      `SELECT id, sortOrder FROM tasks WHERE "column" = ? AND projectId = ? AND id != ? ORDER BY sortOrder ASC NULLS LAST, createdAt ASC`
+    ).all(column, task.projectId || 'default', taskId);
+
+    // Clamp newIndex to valid range
+    const clampedIndex = Math.max(0, Math.min(newIndex, siblings.length));
+
+    let newSortOrder;
+    if (siblings.length === 0) {
+      newSortOrder = 1000;
+    } else if (clampedIndex === 0) {
+      // Insert before the first card
+      const firstOrder = siblings[0].sortOrder != null ? siblings[0].sortOrder : 1000;
+      newSortOrder = firstOrder - 1000;
+    } else if (clampedIndex >= siblings.length) {
+      // Insert after the last card
+      const lastOrder = siblings[siblings.length - 1].sortOrder != null ? siblings[siblings.length - 1].sortOrder : 1000;
+      newSortOrder = lastOrder + 1000;
+    } else {
+      // Insert between two cards
+      const prev = siblings[clampedIndex - 1].sortOrder != null ? siblings[clampedIndex - 1].sortOrder : 0;
+      const next = siblings[clampedIndex].sortOrder != null ? siblings[clampedIndex].sortOrder : prev + 2000;
+      newSortOrder = (prev + next) / 2;
+
+      // Renormalize if the gap gets too small (< 0.001)
+      if (Math.abs(next - prev) < 0.001) {
+        // Renormalize all tasks in this column with spacing of 1000
+        const allInCol = db.prepare(
+          `SELECT id FROM tasks WHERE "column" = ? AND projectId = ? ORDER BY sortOrder ASC NULLS LAST, createdAt ASC`
+        ).all(column, task.projectId || 'default');
+        const renorm = db.transaction(() => {
+          allInCol.forEach((t, i) => {
+            db.prepare('UPDATE tasks SET sortOrder = ? WHERE id = ?').run((i + 1) * 1000, t.id);
+          });
+        });
+        renorm();
+        // After renormalization, recompute newSortOrder
+        const renormedSiblings = db.prepare(
+          `SELECT id, sortOrder FROM tasks WHERE "column" = ? AND projectId = ? AND id != ? ORDER BY sortOrder ASC`
+        ).all(column, task.projectId || 'default', taskId);
+        const ci = Math.min(clampedIndex, renormedSiblings.length);
+        if (ci === 0) {
+          newSortOrder = (renormedSiblings[0]?.sortOrder ?? 1000) - 1000;
+        } else if (ci >= renormedSiblings.length) {
+          newSortOrder = (renormedSiblings[renormedSiblings.length - 1]?.sortOrder ?? 0) + 1000;
+        } else {
+          newSortOrder = ((renormedSiblings[ci - 1].sortOrder ?? 0) + (renormedSiblings[ci].sortOrder ?? 0)) / 2;
+        }
+      }
+    }
+
+    // Update the task's column and sortOrder
+    db.prepare('UPDATE tasks SET "column" = ?, sortOrder = ? WHERE id = ?').run(column, newSortOrder, taskId);
+
+    // If column changed, log it
+    if (column !== task.column) {
+      const now = new Date().toISOString();
+      const actId = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+      db.prepare(
+        'INSERT INTO card_activity (id, taskId, type, content, author, createdAt) VALUES (?, ?, ?, ?, ?, ?)'
+      ).run(actId, taskId, 'move', `Moved from ${COL_LABELS[task.column] || task.column} → ${COL_LABELS[column] || column}`, 'System', now);
+      db.prepare(
+        'INSERT INTO notifications (task_id, task_title, from_col, to_col, changed_by, created_at) VALUES (?, ?, ?, ?, ?, ?)'
+      ).run(taskId, task.title, task.column, column, task.assignee || 'System', now);
+    }
+
+    const updated = db.prepare('SELECT * FROM tasks WHERE id = ?').get(taskId);
+    sseBroadcast(task.projectId || 'default', 'task.updated', { task: updated });
+    res.json({ ...updated, tags: JSON.parse(updated.tags), sortOrder: newSortOrder });
+  } catch (err) {
+    console.error('POST /api/tasks/reorder error:', err);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
