@@ -254,4 +254,15 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_notifications_task_id ON notifications(task_id);
 `);
 
+// Migration: add project_id column to notifications if missing
+(function() {
+  const cols = db.prepare("PRAGMA table_info(notifications)").all().map(c => c.name);
+  if (!cols.includes('project_id')) {
+    db.exec("ALTER TABLE notifications ADD COLUMN project_id TEXT");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_notifications_project_id ON notifications(project_id)");
+    // Backfill from tasks table
+    db.exec("UPDATE notifications SET project_id = (SELECT projectId FROM tasks WHERE tasks.id = notifications.task_id) WHERE project_id IS NULL");
+  }
+})();
+
 module.exports = db;

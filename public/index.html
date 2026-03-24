@@ -3583,7 +3583,9 @@ async function loadTasks() {
       fetch('/api/dependencies'),
     ]);
     if (!tasksRes.ok) throw new Error(`Server error: ${tasksRes.status} ${tasksRes.statusText}`);
-    tasks = await tasksRes.json();
+    const tasksData = await tasksRes.json();
+    // Handle both paginated envelope { total, limit, offset, items } and plain array
+    tasks = Array.isArray(tasksData) ? tasksData : (tasksData.items || []);
     dependencies = await depsRes.json();
     hideBoardLoading();
     hideBoardError();

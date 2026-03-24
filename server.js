@@ -364,6 +364,9 @@ app.put('/api/projects/:id', (req, res) => {
   try {
     const existing = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id);
     if (!existing) return res.status(404).json({ error: 'Not found' });
+    if (req.body.agentConfig !== undefined && req.body.agentConfig !== null && typeof req.body.agentConfig !== 'object') {
+      return res.status(400).json({ error: 'agentConfig must be an object or null' });
+    }
     const updated = {
       name: req.body.name !== undefined ? req.body.name : existing.name,
       color: req.body.color !== undefined ? req.body.color : existing.color,
@@ -597,26 +600,54 @@ app.delete('/api/templates/:id', (req, res) => {
 // ─── Tasks ────────────────────────────────────────────────────────────────────
 
 // Get all tasks (optionally filtered by projectId)
+// Supports pagination via ?limit=200&offset=0 query params.
+// Returns { total, limit, offset, items: [...] } when limit is specified,
+// or a plain array for backward compatibility when limit is omitted.
 app.get('/api/tasks', (req, res) => {
   try {
     const projectId = req.query.projectId || 'default';
+    const usePagination = req.query.limit !== undefined || req.query.offset !== undefined;
+    const limit = Math.max(1, Math.min(1000, parseInt(req.query.limit, 10) || 200));
+    const offset = Math.max(0, parseInt(req.query.offset, 10) || 0);
+
     // Lock expiry is handled by background cleanup (see setInterval below) — no UPDATE here
-    let rows = db.prepare("SELECT * FROM tasks WHERE projectId = ?").all(projectId);
 
     // ?tag=<value> — filter in JS after fetch (safe: avoids SQL LIKE injection / ReDoS).
     // Tags are stored as JSON arrays; use exact Array.includes() match.
-    if (req.query.tag !== undefined) {
-      const filterTag = req.query.tag;
-      rows = rows.filter(row => {
+    const filterTag = req.query.tag !== undefined ? req.query.tag : null;
+
+    // Get total count for pagination envelope (before tag filter, which is in-JS)
+    // If tag filter is active we need full rows to filter, then count — fetch all for tag case.
+    let rows;
+    let total;
+    if (filterTag !== null) {
+      // Tag filter requires in-JS processing — fetch all matching rows then paginate
+      const allRows = db.prepare("SELECT * FROM tasks WHERE projectId = ?").all(projectId);
+      rows = allRows.filter(row => {
         try {
           return JSON.parse(row.tags || '[]').includes(filterTag);
         } catch { return false; }
       });
+      total = rows.length;
+      if (usePagination) {
+        rows = rows.slice(offset, offset + limit);
+      }
+    } else {
+      // No tag filter — use SQL LIMIT/OFFSET for efficiency
+      total = db.prepare("SELECT COUNT(*) AS cnt FROM tasks WHERE projectId = ?").get(projectId).cnt;
+      if (usePagination) {
+        rows = db.prepare("SELECT * FROM tasks WHERE projectId = ? LIMIT ? OFFSET ?").all(projectId, limit, offset);
+      } else {
+        rows = db.prepare("SELECT * FROM tasks WHERE projectId = ?").all(projectId);
+      }
     }
 
-    // Compute blocked status for each task
-    const doneIds = new Set(rows.filter(r => r.column === 'done').map(r => r.id));
-    res.json(rows.map(row => ({
+    // Compute blocked status — need doneIds from the full set when paginating
+    const doneIds = usePagination
+      ? new Set(db.prepare("SELECT id FROM tasks WHERE projectId = ? AND \"column\" = 'done'").all(projectId).map(r => r.id))
+      : new Set(rows.filter(r => r.column === 'done').map(r => r.id));
+
+    const items = rows.map(row => ({
       ...row,
       tags: JSON.parse(row.tags),
       subtasks: row.subtasks ? JSON.parse(row.subtasks) : null,
@@ -631,7 +662,13 @@ app.get('/api/tasks', (req, res) => {
         if (expires && expires < now) return 'idle'; // lock expired
         return row.column === 'in-progress' ? 'in-progress' : 'claimed';
       })(),
-    })));
+    }));
+
+    if (usePagination) {
+      res.json({ total, limit, offset, items });
+    } else {
+      res.json(items);
+    }
   } catch (err) {
     console.error('GET /api/tasks error:', err);
     res.status(500).json({ error: 'Internal server error' });
@@ -738,10 +775,12 @@ app.post('/api/tasks', (req, res) => {
 
     // Sync blockedBy to task_dependencies
     for (const blockerId of blockedByArr) {
-      const blockerExists = db.prepare('SELECT id FROM tasks WHERE id = ?').get(blockerId);
-      if (blockerExists) {
-        db.prepare('INSERT OR IGNORE INTO task_dependencies (blocker_id, blocked_id) VALUES (?, ?)').run(blockerId, task.id);
+      const blockerExists = db.prepare('SELECT id, projectId FROM tasks WHERE id = ?').get(blockerId);
+      if (!blockerExists) continue;
+      if (blockerExists.projectId !== task.projectId) {
+        return res.status(400).json({ error: `Blocker task ${blockerId} belongs to a different project and cannot block this task` });
       }
+      db.prepare('INSERT OR IGNORE INTO task_dependencies (blocker_id, blocked_id) VALUES (?, ?)').run(blockerId, task.id);
     }
 
     // Log card creation
@@ -797,6 +836,17 @@ app.put('/api/tasks/:id', (req, res) => {
     updated.blockedBy = Array.isArray(req.body.blockedBy) ? req.body.blockedBy : [];
   } else {
     updated.blockedBy = existing.blockedBy ? JSON.parse(existing.blockedBy) : [];
+  }
+
+  // Validate cross-project blockedBy references
+  if (req.body.blockedBy !== undefined) {
+    const taskProjectId = updated.projectId || existing.projectId || 'default';
+    for (const blockerId of updated.blockedBy) {
+      const blockerExists = db.prepare('SELECT id, projectId FROM tasks WHERE id = ?').get(blockerId);
+      if (blockerExists && blockerExists.projectId !== taskProjectId) {
+        return res.status(400).json({ error: `Blocker task ${blockerId} belongs to a different project and cannot block this task` });
+      }
+    }
   }
 
   // Preserve lock/agent fields from existing — never overwrite from req.body
@@ -1025,6 +1075,25 @@ app.post('/api/tasks/:id/spawn', async (req, res) => {
   }
 });
 
+// GET /api/tasks/:id/handoff — get handoff log entries for a task (paginated)
+// Query params: ?limit=100&offset=0 (default limit 100, max 500)
+app.get('/api/tasks/:id/handoff', (req, res) => {
+  try {
+    const task = db.prepare('SELECT handoffLog FROM tasks WHERE id = ?').get(req.params.id);
+    if (!task) return res.status(404).json({ error: 'Not found' });
+
+    const limit = Math.min(parseInt(req.query.limit, 10) || 100, 500);
+    const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
+
+    const log = task.handoffLog ? JSON.parse(task.handoffLog) : [];
+    const page = log.slice(offset, offset + limit);
+    res.json(page);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 // POST /api/tasks/:id/handoff — append handoff note
 app.post('/api/tasks/:id/handoff', (req, res) => {
   try {
@@ -1120,10 +1189,13 @@ app.delete('/api/tasks/:id', (req, res) => {
   }
 });
 
-// Get activity/comments for a task
+// Get activity/comments for a task (paginated)
+// Query params: ?limit=100&offset=0 (default limit 100, max 500)
 app.get('/api/tasks/:id/activity', (req, res) => {
   try {
-    const rows = db.prepare('SELECT * FROM card_activity WHERE taskId = ? ORDER BY createdAt ASC').all(req.params.id);
+    const limit = Math.min(parseInt(req.query.limit, 10) || 100, 500);
+    const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
+    const rows = db.prepare('SELECT * FROM card_activity WHERE taskId = ? ORDER BY createdAt ASC LIMIT ? OFFSET ?').all(req.params.id, limit, offset);
     res.json(rows);
   } catch (err) {
     console.error(err);
