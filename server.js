@@ -535,6 +535,53 @@ app.get('/api/projects/:id', (req, res) => {
   }
 });
 
+// GET /api/projects/:id/handoffs — project-scoped handoff log feed (paginated)
+// Returns all handoff log entries for tasks in the given project, newest first.
+// Query params: ?limit=50&offset=0
+// Response: { total, limit, offset, items: [{ taskId, taskTitle, agentId, timestamp, message }, ...] }
+app.get('/api/projects/:id/handoffs', (req, res) => {
+  try {
+    const project = db.prepare('SELECT id FROM projects WHERE id = ?').get(req.params.id);
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+
+    const limit = Math.max(1, Math.min(500, parseInt(req.query.limit, 10) || 50));
+    const offset = Math.max(0, parseInt(req.query.offset, 10) || 0);
+
+    // Fetch all tasks in this project that have handoff logs
+    const rows = db.prepare(
+      "SELECT id, title, handoffLog FROM tasks WHERE projectId = ? AND handoffLog IS NOT NULL AND handoffLog != '[]'"
+    ).all(req.params.id);
+
+    // Flatten all handoff entries with task context, then sort by timestamp descending
+    const allEntries = [];
+    for (const row of rows) {
+      let log;
+      try { log = JSON.parse(row.handoffLog); } catch { continue; }
+      if (!Array.isArray(log)) continue;
+      for (const entry of log) {
+        allEntries.push({
+          taskId: row.id,
+          taskTitle: row.title,
+          agentId: entry.agentId || entry.agentSessionId || 'unknown',
+          timestamp: entry.timestamp || null,
+          message: entry.message || entry.note || '',
+        });
+      }
+    }
+
+    // Sort newest first
+    allEntries.sort((a, b) => (b.timestamp || '').localeCompare(a.timestamp || ''));
+
+    const total = allEntries.length;
+    const items = allEntries.slice(offset, offset + limit);
+
+    res.json({ total, limit, offset, items });
+  } catch (err) {
+    console.error('GET /api/projects/:id/handoffs error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // POST /api/projects — create a project
 app.post('/api/projects', (req, res) => {
   try {
