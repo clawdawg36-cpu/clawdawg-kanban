@@ -974,12 +974,14 @@ app.get('/api/webhooks/:id', (req, res) => {
 
 app.post('/api/webhooks', async (req, res) => {
   try {
+    const plaintextSecret = req.body.secret || generateWebhookSecret();
     const hook = {
       id: Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
       projectId: req.body.projectId || 'default',
       url: req.body.url || '',
       events: req.body.events || [],
-      secret: req.body.secret || null,
+      // Hash the secret before storing — never persist plaintext
+      secret: hashWebhookSecret(plaintextSecret),
       createdAt: new Date().toISOString(),
     };
     if (!hook.url) return res.status(400).json({ error: 'url required' });
@@ -988,7 +990,16 @@ app.post('/api/webhooks', async (req, res) => {
     if (urlError) return res.status(400).json({ error: urlError });
     db.prepare('INSERT INTO webhooks (id, projectId, url, events, secret, createdAt) VALUES (?, ?, ?, ?, ?, ?)')
       .run(hook.id, hook.projectId, hook.url, JSON.stringify(hook.events), hook.secret, hook.createdAt);
-    res.status(201).json({ ...hook });
+    // Return the plaintext secret ONCE on creation — caller must store it securely
+    res.status(201).json({
+      id: hook.id,
+      projectId: hook.projectId,
+      url: hook.url,
+      events: hook.events,
+      secret: plaintextSecret,   // only time plaintext is returned
+      secretHint: maskSecret(hook.secret),
+      createdAt: hook.createdAt,
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Internal server error" });
