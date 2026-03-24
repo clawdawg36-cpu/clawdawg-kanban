@@ -193,6 +193,65 @@ async function validateWebhookUrl(rawUrl) {
   });
 }
 
+const MAX_WEBHOOK_FAILURES = 5; // consecutive failures before auto-disable
+
+function _dispatchWebhookRequest(hook, body, sig) {
+  try {
+    const url = new URL(hook.url);
+    // Only fire over https (skip any http hooks that may have been stored before this fix)
+    if (url.protocol !== 'https:') return;
+    // Resolve and check for private IPs before firing
+    dns.lookup(url.hostname, { all: true }, (err, addresses) => {
+      if (err || !addresses || addresses.length === 0) {
+        _recordWebhookFailure(hook.id);
+        return;
+      }
+      for (const { address } of addresses) {
+        if (isPrivateIp(address)) return; // silently drop SSRF-risk hooks
+      }
+      const options = {
+        hostname: url.hostname,
+        port: url.port || 443,
+        path: url.pathname + url.search,
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body), ...(sig ? { 'X-Webhook-Signature': sig } : {}) },
+      };
+      const req = https.request(options, (res) => {
+        // Drain the response to free the socket; treat 2xx as success
+        res.resume();
+        if (res.statusCode >= 200 && res.statusCode < 300) {
+          // Success: reset failure counter
+          db.prepare('UPDATE webhooks SET failCount = 0 WHERE id = ?').run(hook.id);
+        } else {
+          _recordWebhookFailure(hook.id);
+        }
+      });
+      req.setTimeout(5000, () => req.destroy());
+      req.on('error', () => {
+        _recordWebhookFailure(hook.id);
+      });
+      req.write(body);
+      req.end();
+    });
+  } catch(e) { /* ignore bad URLs */ }
+}
+
+function _recordWebhookFailure(hookId) {
+  const hook = db.prepare('SELECT id, failCount FROM webhooks WHERE id = ?').get(hookId);
+  if (!hook) return;
+  const newCount = (hook.failCount || 0) + 1;
+  const now = new Date().toISOString();
+  if (newCount >= MAX_WEBHOOK_FAILURES) {
+    // Auto-disable: set events to '[]' so it won't fire, and log a warning
+    db.prepare('UPDATE webhooks SET failCount = ?, lastFailedAt = ?, events = ? WHERE id = ?')
+      .run(newCount, now, '[]', hookId);
+    console.warn(`[webhook] Auto-disabled webhook ${hookId} after ${newCount} consecutive failures`);
+  } else {
+    db.prepare('UPDATE webhooks SET failCount = ?, lastFailedAt = ? WHERE id = ?')
+      .run(newCount, now, hookId);
+  }
+}
+
 function fireWebhook(projectId, eventType, payload) {
   const hooks = db.prepare("SELECT * FROM webhooks WHERE projectId = ? AND (events = '[]' OR events LIKE ?)").all(projectId, `%"${eventType}"%`);
   for (const hook of hooks) {
@@ -200,30 +259,12 @@ function fireWebhook(projectId, eventType, payload) {
     // Decrypt the stored secret before using it for HMAC signing
     const signingKey = decryptWebhookSecret(hook.secret);
     const sig = signingKey ? 'sha256=' + crypto.createHmac('sha256', signingKey).update(body).digest('hex') : null;
-    try {
-      const url = new URL(hook.url);
-      // Only fire over https (skip any http hooks that may have been stored before this fix)
-      if (url.protocol !== 'https:') continue;
-      // Resolve and check for private IPs before firing
-      dns.lookup(url.hostname, { all: true }, (err, addresses) => {
-        if (err || !addresses || addresses.length === 0) return;
-        for (const { address } of addresses) {
-          if (isPrivateIp(address)) return; // silently drop SSRF-risk hooks
-        }
-        const options = {
-          hostname: url.hostname,
-          port: url.port || 443,
-          path: url.pathname + url.search,
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body), ...(sig ? { 'X-Webhook-Signature': sig } : {}) },
-        };
-        const req = https.request(options);
-        req.setTimeout(5000, () => req.destroy());
-        req.on('error', () => {}); // fire-and-forget
-        req.write(body);
-        req.end();
-      });
-    } catch(e) { /* ignore bad URLs */ }
+    // Capture hook reference for closure
+    const hookRef = hook;
+    const sigRef = sig;
+    const bodyRef = body;
+    // Dispatch asynchronously after response is sent
+    setImmediate(() => _dispatchWebhookRequest(hookRef, bodyRef, sigRef));
   }
 }
 
