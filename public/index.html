@@ -3702,9 +3702,13 @@ function render() {
     } else {
       colEl.classList.remove('mobile-active');
       list.querySelectorAll('.card').forEach(card => {
-        card.setAttribute('draggable', 'true');
-        card.addEventListener('dragstart', onDragStart);
-        card.addEventListener('dragend', onDragEnd);
+        if (selectMode) {
+          card.setAttribute('draggable', 'false');
+        } else {
+          card.setAttribute('draggable', 'true');
+          card.addEventListener('dragstart', onDragStart);
+          card.addEventListener('dragend', onDragEnd);
+        }
       });
     }
   });
@@ -3825,8 +3829,10 @@ function cardHTML(t, q) {
     </div>`;
   }
 
-  return `<div class="card${isOverdue ? ' overdue-card' : ''}${blocked ? ' is-blocked' : ''}${t.column === 'idea' ? ' idea-card' : ''}" draggable="true" data-id="${t.id}" tabindex="0">
+  const isSelected = selectedTaskIds.has(t.id);
+  return `<div class="card${isOverdue ? ' overdue-card' : ''}${blocked ? ' is-blocked' : ''}${t.column === 'idea' ? ' idea-card' : ''}${isSelected ? ' selected' : ''}" draggable="true" data-id="${t.id}" tabindex="0" onclick="onCardBulkClick(event, '${t.id}')">
     <div class="card-priority ${t.priority}"></div>
+    <div class="card-checkbox-wrap"><input type="checkbox" class="card-checkbox" ${isSelected ? 'checked' : ''} onclick="onCardBulkClick(event, '${t.id}')" aria-label="Select ${esc(t.title)}"></div>
     <div class="card-actions">
       ${(t.column === 'backlog' && !t.lockedBy && !isBlocked(t.id)) ? `<button class="card-action-btn" onclick="spawnAgent('${t.id}', event)" title="Run agent" aria-label="Run agent for ${esc(t.title)}">▶</button>` : ''}
       <button class="card-action-btn" onclick="editTask('${t.id}')" title="Edit card" aria-label="Edit ${esc(t.title)}">&#9998;</button>
@@ -3854,6 +3860,115 @@ function esc(s) {
   const d = document.createElement('div');
   d.textContent = s;
   return d.innerHTML;
+}
+
+// ─── Bulk Selection ────────────────────────────────────────────────────────────
+let selectMode = false;
+let selectedTaskIds = new Set();
+
+function toggleSelectMode() {
+  selectMode = !selectMode;
+  document.body.classList.toggle('select-mode', selectMode);
+  document.getElementById('selectModeBtn').classList.toggle('active', selectMode);
+  if (!selectMode) {
+    selectedTaskIds.clear();
+    updateBulkToolbar();
+  }
+  render();
+}
+
+function clearBulkSelection() {
+  selectedTaskIds.clear();
+  updateBulkToolbar();
+  render();
+}
+
+function updateBulkToolbar() {
+  const toolbar = document.getElementById('bulkToolbar');
+  const countEl = document.getElementById('bulkCount');
+  const n = selectedTaskIds.size;
+  countEl.textContent = `${n} selected`;
+  toolbar.classList.toggle('visible', n > 0);
+  // Reset the move dropdown
+  document.getElementById('bulkMoveSelect').value = '';
+}
+
+function onCardBulkClick(e, taskId) {
+  if (!selectMode) return;
+  e.stopPropagation();
+  if (selectedTaskIds.has(taskId)) {
+    selectedTaskIds.delete(taskId);
+  } else {
+    selectedTaskIds.add(taskId);
+  }
+  updateBulkToolbar();
+  // Toggle visual state on the card element directly (no full re-render)
+  const cardEl = document.querySelector(`.card[data-id="${taskId}"]`);
+  if (cardEl) {
+    cardEl.classList.toggle('selected', selectedTaskIds.has(taskId));
+    const cb = cardEl.querySelector('.card-checkbox');
+    if (cb) cb.checked = selectedTaskIds.has(taskId);
+  }
+}
+
+async function bulkMoveSelected(col) {
+  if (!col || selectedTaskIds.size === 0) return;
+  document.getElementById('bulkMoveSelect').value = '';
+  const ids = [...selectedTaskIds];
+  try {
+    const res = await fetch('/api/tasks/bulk', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids, action: 'move', data: { column: col } }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      showToast(`Bulk move failed: ${err.error || res.statusText}`, 'error');
+      return;
+    }
+    const result = await res.json();
+    // Update local task state
+    tasks.forEach(t => {
+      if (selectedTaskIds.has(t.id)) t.column = col;
+    });
+    showToast(`Moved ${result.affected} card${result.affected !== 1 ? 's' : ''} to ${COL_LABELS[col]}`, 'success', 3000);
+    clearBulkSelection();
+    render();
+  } catch (err) {
+    showToast(`Bulk move error: ${err.message}`, 'error');
+  }
+}
+
+async function bulkDeleteSelected() {
+  if (selectedTaskIds.size === 0) return;
+  const n = selectedTaskIds.size;
+  const confirmed = await confirmModal(
+    `Delete ${n} card${n !== 1 ? 's' : ''}?`,
+    `This will permanently delete ${n} selected card${n !== 1 ? 's' : ''}. This cannot be undone.`,
+    `Delete ${n} card${n !== 1 ? 's' : ''}`
+  );
+  if (!confirmed) return;
+
+  const ids = [...selectedTaskIds];
+  try {
+    const res = await fetch('/api/tasks/bulk', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids, action: 'delete' }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      showToast(`Bulk delete failed: ${err.error || res.statusText}`, 'error');
+      return;
+    }
+    const result = await res.json();
+    tasks = tasks.filter(t => !selectedTaskIds.has(t.id));
+    showToast(`Deleted ${result.affected} card${result.affected !== 1 ? 's' : ''}`, 'success', 3000);
+    clearBulkSelection();
+    render();
+  } catch (err) {
+    showToast(`Bulk delete error: ${err.message}`, 'error');
+  }
 }
 
 // ─── Toast System ─────────────────────────────────────────────────────────────
