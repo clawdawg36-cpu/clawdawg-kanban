@@ -232,6 +232,53 @@ db.exec(`
   )
 `);
 
+// Handoff log table — replaces the handoffLog JSON blob in tasks
+// Each row is one handoff note from one agent for one task.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS handoff_log (
+    id TEXT PRIMARY KEY,
+    taskId TEXT NOT NULL,
+    agentId TEXT DEFAULT 'unknown',
+    message TEXT NOT NULL,
+    timestamp TEXT NOT NULL,
+    FOREIGN KEY (taskId) REFERENCES tasks(id) ON DELETE CASCADE
+  )
+`);
+
+// Index for fast per-task lookups
+db.exec(`CREATE INDEX IF NOT EXISTS idx_handoff_log_taskId ON handoff_log(taskId)`);
+
+// One-time migration: move any existing handoffLog JSON blobs into the new table.
+// Safe to run on every startup — only processes rows that haven't been migrated yet
+// (tasks whose handoffLog is a non-empty JSON array AND whose taskId has no rows in handoff_log).
+(function migrateHandoffLogs() {
+  const tasks = db.prepare("SELECT id, handoffLog FROM tasks WHERE handoffLog IS NOT NULL AND handoffLog != '[]' AND handoffLog != ''").all();
+  const cryptoMod = require('crypto');
+  const insertEntry = db.prepare('INSERT OR IGNORE INTO handoff_log (id, taskId, agentId, message, timestamp) VALUES (?, ?, ?, ?, ?)');
+  const migrate = db.transaction((tasks) => {
+    for (const task of tasks) {
+      // Skip if already migrated
+      const existing = db.prepare('SELECT COUNT(*) AS cnt FROM handoff_log WHERE taskId = ?').get(task.id);
+      if (existing.cnt > 0) continue;
+      let entries;
+      try { entries = JSON.parse(task.handoffLog); } catch(e) { continue; }
+      if (!Array.isArray(entries) || entries.length === 0) continue;
+      for (const entry of entries) {
+        const entryId = cryptoMod.randomBytes(8).toString('hex');
+        insertEntry.run(
+          entryId,
+          task.id,
+          entry.agentId || 'unknown',
+          entry.message || '',
+          entry.timestamp || new Date().toISOString()
+        );
+      }
+      console.log(`Migrated ${entries.length} handoff entry/entries for task ${task.id}`);
+    }
+  });
+  migrate(tasks);
+})();
+
 // Indexes for common query patterns
 db.exec(`
   CREATE INDEX IF NOT EXISTS idx_tasks_projectId ON tasks(projectId);
