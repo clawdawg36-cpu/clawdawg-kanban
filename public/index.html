@@ -2491,6 +2491,19 @@ input[type="date"] {
         </div>
       </div>
     </div>
+
+    <!-- Handoff Log -->
+    <div class="activity-section" id="handoffSection" style="display:none">
+      <button class="activity-toggle" id="handoffToggle" onclick="toggleHandoff()">
+        <span>🤝</span> Handoff Notes
+        <span class="activity-toggle-arrow" id="handoffArrow">▼</span>
+      </button>
+      <div class="activity-body" id="handoffBody">
+        <div class="activity-list" id="handoffList">
+          <div class="activity-empty">No handoff notes yet.</div>
+        </div>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -3119,6 +3132,19 @@ function openModal(task) {
     attachSection.style.display = 'none';
   }
 
+  // Handoff log — only for existing tasks
+  const handoffSection = document.getElementById('handoffSection');
+  if (task) {
+    handoffSection.style.display = '';
+    handoffOpen = false;
+    document.getElementById('handoffToggle').classList.remove('expanded');
+    document.getElementById('handoffBody').classList.remove('open');
+    currentHandoffLog = Array.isArray(task.handoffLog) ? task.handoffLog : [];
+    renderHandoffLog();
+  } else {
+    handoffSection.style.display = 'none';
+  }
+
   setTimeout(() => document.getElementById('fTitle').focus(), 100);
 }
 
@@ -3229,6 +3255,37 @@ function toggleActivity() {
     const list = document.getElementById('activityList');
     setTimeout(() => { list.scrollTop = list.scrollHeight; }, 50);
   }
+}
+
+let handoffOpen = false;
+let currentHandoffLog = [];
+
+function toggleHandoff() {
+  handoffOpen = !handoffOpen;
+  document.getElementById('handoffToggle').classList.toggle('expanded', handoffOpen);
+  document.getElementById('handoffBody').classList.toggle('open', handoffOpen);
+}
+
+function renderHandoffLog() {
+  const list = document.getElementById('handoffList');
+  if (!list) return;
+  if (!currentHandoffLog.length) {
+    list.innerHTML = '<div class="activity-empty">No handoff notes yet.</div>';
+    return;
+  }
+  list.innerHTML = currentHandoffLog.map(entry => `
+    <div class="activity-item">
+      <div class="activity-icon" style="background:rgba(0,184,148,0.15);color:var(--green)">🤝</div>
+      <div class="activity-content">
+        <div class="activity-text">${esc(entry.message)}</div>
+        <div class="activity-meta">
+          <span>${esc(entry.agentId)}</span>
+          <span>·</span>
+          <span>${formatRelTime(entry.timestamp)}</span>
+        </div>
+      </div>
+    </div>
+  `).join('');
 }
 
 async function submitComment() {

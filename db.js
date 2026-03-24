@@ -99,6 +99,10 @@ if (!cols.includes('wave')) {
   db.exec('ALTER TABLE tasks ADD COLUMN wave INTEGER DEFAULT NULL');
   console.log('Migrated: added wave column to tasks table');
 }
+if (!cols.includes('handoffLog')) {
+  db.exec("ALTER TABLE tasks ADD COLUMN handoffLog TEXT DEFAULT '[]'");
+  console.log('Migrated: added handoffLog column to tasks table');
+}
 
 // Ensure default project exists and assign orphaned tasks to it
 const defaultProject = db.prepare("SELECT id FROM projects WHERE id = 'default'").get();

@@ -176,6 +176,7 @@ app.get('/api/tasks', (req, res) => {
     subtasks: row.subtasks ? JSON.parse(row.subtasks) : null,
     blockedBy: row.blockedBy ? JSON.parse(row.blockedBy) : [],
     blocked: deps.some(d => d.blocked_id === row.id && !doneIds.has(d.blocker_id)),
+    handoffLog: row.handoffLog ? JSON.parse(row.handoffLog) : [],
   })));
 });
 
@@ -368,7 +369,28 @@ app.get('/api/tasks/:id', (req, res) => {
     subtasks: task.subtasks ? JSON.parse(task.subtasks) : null,
     blockedBy: task.blockedBy ? JSON.parse(task.blockedBy) : [],
     blocked: activeBlockers.length > 0,
+    handoffLog: task.handoffLog ? JSON.parse(task.handoffLog) : [],
   });
+});
+
+// POST /api/tasks/:id/handoff — append handoff note
+app.post('/api/tasks/:id/handoff', (req, res) => {
+  const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id);
+  if (!task) return res.status(404).json({ error: 'Not found' });
+
+  const entry = {
+    agentId: req.body.agentId || 'unknown',
+    timestamp: new Date().toISOString(),
+    message: (req.body.message || '').trim(),
+  };
+  if (!entry.message) return res.status(400).json({ error: 'message required' });
+
+  const log = task.handoffLog ? JSON.parse(task.handoffLog) : [];
+  log.push(entry);
+
+  db.prepare('UPDATE tasks SET handoffLog = ? WHERE id = ?').run(JSON.stringify(log), task.id);
+
+  res.status(201).json(entry);
 });
 
 // Delete task
