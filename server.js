@@ -311,8 +311,26 @@ app.put('/api/projects/:id', (req, res) => {
 app.delete('/api/projects/:id', (req, res) => {
   try {
     if (req.params.id === 'default') return res.status(400).json({ error: 'Cannot delete default project' });
-    db.prepare("DELETE FROM tasks WHERE projectId = ?").run(req.params.id);
-    db.prepare('DELETE FROM projects WHERE id = ?').run(req.params.id);
+    const deleteProject = db.transaction(() => {
+      const projectId = req.params.id;
+      // Get all task IDs for this project (needed for child-table cleanup)
+      const taskIds = db.prepare("SELECT id FROM tasks WHERE projectId = ?").all(projectId).map(t => t.id);
+      if (taskIds.length > 0) {
+        const placeholders = taskIds.map(() => '?').join(', ');
+        // Cascade cleanup of child tables referencing task IDs
+        db.prepare(`DELETE FROM agent_logs WHERE taskId IN (${placeholders})`).run(...taskIds);
+        db.prepare(`DELETE FROM card_activity WHERE taskId IN (${placeholders})`).run(...taskIds);
+        db.prepare(`DELETE FROM notifications WHERE task_id IN (${placeholders})`).run(...taskIds);
+        db.prepare(`DELETE FROM task_dependencies WHERE blocker_id IN (${placeholders}) OR blocked_id IN (${placeholders})`).run(...taskIds, ...taskIds);
+        db.prepare(`DELETE FROM attachments WHERE task_id IN (${placeholders})`).run(...taskIds);
+      }
+      // Delete tasks, templates, and webhooks for this project
+      db.prepare("DELETE FROM tasks WHERE projectId = ?").run(projectId);
+      db.prepare("DELETE FROM templates WHERE projectId = ?").run(projectId);
+      db.prepare("DELETE FROM webhooks WHERE projectId = ?").run(projectId);
+      db.prepare('DELETE FROM projects WHERE id = ?').run(projectId);
+    });
+    deleteProject();
     res.status(204).end();
   } catch (err) {
     console.error('DELETE /api/projects/:id error:', err);
