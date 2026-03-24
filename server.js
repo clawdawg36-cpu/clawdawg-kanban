@@ -93,6 +93,27 @@ const http = require('http');
 const crypto = require('crypto');
 const dns = require('dns');
 
+// Server-side key for HMAC-hashing webhook secrets at rest.
+// Falls back to a stable derived key so existing servers without the env var work.
+const WEBHOOK_SECRET_KEY = process.env.WEBHOOK_SECRET_KEY ||
+  crypto.createHash('sha256').update('kanban-webhook-secret-key-default').digest('hex');
+
+// Hash a plaintext secret for storage.
+function hashWebhookSecret(plaintext) {
+  return crypto.createHmac('sha256', WEBHOOK_SECRET_KEY).update(plaintext).digest('hex');
+}
+
+// Mask a stored (hashed) secret for display — show only last 4 chars.
+function maskSecret(stored) {
+  if (!stored) return null;
+  return '••••' + stored.slice(-4);
+}
+
+// Generate a new random webhook secret (URL-safe base64, 32 bytes).
+function generateWebhookSecret() {
+  return crypto.randomBytes(32).toString('base64url');
+}
+
 // Check if an IP address is a private/loopback address (SSRF protection)
 function isPrivateIp(ip) {
   // IPv6 loopback
@@ -248,7 +269,8 @@ app.get('/api/templates', (req, res) => {
     const rows = db.prepare('SELECT * FROM templates WHERE projectId = ? ORDER BY createdAt ASC').all(projectId);
     res.json(rows.map(r => ({ ...r, defaultTags: JSON.parse(r.defaultTags) })));
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error(err);
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -270,7 +292,8 @@ app.post('/api/templates', (req, res) => {
     ).run(tmpl.id, tmpl.projectId, tmpl.name, tmpl.defaultDescription, JSON.stringify(tmpl.defaultTags), tmpl.defaultAssignee, tmpl.defaultPriority, tmpl.createdAt);
     res.status(201).json({ ...tmpl });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error(err);
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -280,7 +303,8 @@ app.delete('/api/templates/:id', (req, res) => {
     db.prepare('DELETE FROM templates WHERE id = ?').run(req.params.id);
     res.status(204).end();
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error(err);
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -346,7 +370,8 @@ app.post('/api/tasks/:id/claim', (req, res) => {
     const updated = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id);
     res.json({ ...updated, tags: JSON.parse(updated.tags), subtasks: updated.subtasks ? JSON.parse(updated.subtasks) : null });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error(err);
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -371,7 +396,8 @@ app.post('/api/tasks/:id/release', (req, res) => {
     const updated = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id);
     res.json({ ...updated, tags: JSON.parse(updated.tags), subtasks: updated.subtasks ? JSON.parse(updated.subtasks) : null });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error(err);
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -640,7 +666,8 @@ app.post('/api/tasks/:id/spawn', async (req, res) => {
 
     res.json({ sessionKey, sessionId: sessionKey, taskId: task.id, status: 'spawned' });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error(err);
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -664,7 +691,8 @@ app.post('/api/tasks/:id/handoff', (req, res) => {
 
     res.status(201).json(entry);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error(err);
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -691,7 +719,8 @@ app.post('/api/tasks/:id/logs', (req, res) => {
 
     res.status(201).json({ id: result.lastInsertRowid, ...entry });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error(err);
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -701,7 +730,8 @@ app.get('/api/tasks/:id/logs', (req, res) => {
     const rows = db.prepare('SELECT * FROM agent_logs WHERE taskId = ? ORDER BY timestamp ASC').all(req.params.id);
     res.json(rows);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error(err);
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -848,8 +878,10 @@ app.get('/api/tasks/:id/attachments', (req, res) => {
 app.post('/api/tasks/:id/attachments', (req, res, next) => {
   upload.single('file')(req, res, (err) => {
     if (err) {
+      console.error(err);
       const status = err.status || (err.code === 'LIMIT_FILE_SIZE' ? 413 : 400);
-      return res.status(status).json({ error: err.message });
+      const safeMessage = status === 413 ? 'File too large' : status === 415 ? 'File type not allowed' : 'Upload error';
+      return res.status(status).json({ error: safeMessage });
     }
     next();
   });
@@ -906,9 +938,37 @@ app.get('/api/webhooks', (req, res) => {
   try {
     const projectId = req.query.projectId || 'default';
     const rows = db.prepare('SELECT * FROM webhooks WHERE projectId = ? ORDER BY createdAt ASC').all(projectId);
-    res.json(rows.map(r => ({ ...r, events: JSON.parse(r.events) })));
+    // Never expose raw secrets — return a masked hint (last 4 chars of hash) instead
+    res.json(rows.map(r => ({
+      id: r.id,
+      projectId: r.projectId,
+      url: r.url,
+      events: JSON.parse(r.events),
+      secretHint: maskSecret(r.secret),
+      createdAt: r.createdAt,
+    })));
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error(err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+app.get('/api/webhooks/:id', (req, res) => {
+  try {
+    const row = db.prepare('SELECT * FROM webhooks WHERE id = ?').get(req.params.id);
+    if (!row) return res.status(404).json({ error: 'Not found' });
+    // Never expose raw secrets
+    res.json({
+      id: row.id,
+      projectId: row.projectId,
+      url: row.url,
+      events: JSON.parse(row.events),
+      secretHint: maskSecret(row.secret),
+      createdAt: row.createdAt,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -930,7 +990,8 @@ app.post('/api/webhooks', async (req, res) => {
       .run(hook.id, hook.projectId, hook.url, JSON.stringify(hook.events), hook.secret, hook.createdAt);
     res.status(201).json({ ...hook });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error(err);
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -939,7 +1000,8 @@ app.delete('/api/webhooks/:id', (req, res) => {
     db.prepare('DELETE FROM webhooks WHERE id = ?').run(req.params.id);
     res.status(204).end();
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error(err);
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
