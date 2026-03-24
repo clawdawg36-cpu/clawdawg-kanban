@@ -1034,13 +1034,18 @@ app.get('/api/tasks/:id', (req, res) => {
     // Get blockers and compute blocked status (single query instead of N+1)
     const blockerRows = db.prepare('SELECT id, "column" FROM tasks WHERE id IN (SELECT blocker_id FROM task_dependencies WHERE blocked_id = ?)').all(task.id);
     const activeBlockers = blockerRows.filter(b => b.column !== 'done');
+    // Populate handoffLog from dedicated table (new) or fall back to JSON blob (legacy)
+    const handoffRows = db.prepare('SELECT * FROM handoff_log WHERE taskId = ? ORDER BY timestamp ASC').all(task.id);
+    const handoffLog = handoffRows.length > 0
+      ? handoffRows
+      : (task.handoffLog ? JSON.parse(task.handoffLog) : []);
     res.json({
       ...task,
       tags: JSON.parse(task.tags),
       subtasks: task.subtasks ? JSON.parse(task.subtasks) : null,
       blockedBy: task.blockedBy ? JSON.parse(task.blockedBy) : [],
       blocked: activeBlockers.length > 0,
-      handoffLog: task.handoffLog ? JSON.parse(task.handoffLog) : [],
+      handoffLog,
       agentStatus: (() => {
         if (task.column === 'done') return 'done';
         if (!task.lockedBy) return 'idle';
@@ -1150,25 +1155,42 @@ app.post('/api/tasks/:id/spawn', async (req, res) => {
   }
 });
 
-// POST /api/tasks/:id/handoff — append handoff note
+// POST /api/tasks/:id/handoff — append a handoff note (writes to dedicated table)
 app.post('/api/tasks/:id/handoff', (req, res) => {
   try {
-    const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id);
+    const task = db.prepare('SELECT id FROM tasks WHERE id = ?').get(req.params.id);
     if (!task) return res.status(404).json({ error: 'Not found' });
 
+    const message = (req.body.message || req.body.note || '').trim();
+    if (!message) return res.status(400).json({ error: 'message required' });
+
+    const crypto = require('crypto');
     const entry = {
-      agentId: req.body.agentId || 'unknown',
+      id: crypto.randomBytes(8).toString('hex'),
+      taskId: req.params.id,
+      agentId: req.body.agentId || req.body.agentSessionId || 'unknown',
+      message,
       timestamp: new Date().toISOString(),
-      message: (req.body.message || '').trim(),
     };
-    if (!entry.message) return res.status(400).json({ error: 'message required' });
 
-    const log = task.handoffLog ? JSON.parse(task.handoffLog) : [];
-    log.push(entry);
-
-    db.prepare('UPDATE tasks SET handoffLog = ? WHERE id = ?').run(JSON.stringify(log), task.id);
+    db.prepare('INSERT INTO handoff_log (id, taskId, agentId, message, timestamp) VALUES (?, ?, ?, ?, ?)')
+      .run(entry.id, entry.taskId, entry.agentId, entry.message, entry.timestamp);
 
     res.status(201).json(entry);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// GET /api/tasks/:id/handoff — list all handoff notes for a task
+app.get('/api/tasks/:id/handoff', (req, res) => {
+  try {
+    const task = db.prepare('SELECT id FROM tasks WHERE id = ?').get(req.params.id);
+    if (!task) return res.status(404).json({ error: 'Not found' });
+
+    const rows = db.prepare('SELECT * FROM handoff_log WHERE taskId = ? ORDER BY timestamp ASC').all(req.params.id);
+    res.json(rows);
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Internal server error" });
