@@ -60,6 +60,79 @@ ClawDawg monitors the board automatically. Any card assigned to **ClawDawg** in 
 
 Mike can add tasks for ClawDawg directly on the board, and ClawDawg can add tasks for Mike when input or approval is needed.
 
+## Database Backup & Restore
+
+The server automatically backs up the SQLite database every **6 hours** to `kanban.db.bak` in the project root (first backup runs 30 seconds after startup).
+
+### Manual backup
+
+```bash
+# Copy the live DB while the server is running — better-sqlite3 handles this safely via its backup API.
+# Or just copy the file while the server is stopped:
+cp kanban.db kanban.db.bak
+```
+
+### Restore from backup
+
+```bash
+# Stop the server first, then:
+cp kanban.db.bak kanban.db
+node server.js
+```
+
+### If the database is corrupted
+
+If the server refuses to start with a corruption error:
+
+1. Stop the server
+2. Restore from backup: `cp kanban.db.bak kanban.db`
+3. Restart: `node server.js`
+
+If no backup exists, remove the corrupted file to start fresh (all data will be lost):
+
+```bash
+rm kanban.db
+node server.js
+```
+
+> **Note:** `kanban.db`, `kanban.db.bak`, `kanban.db-shm`, and `kanban.db-wal` are gitignored and will never be committed.
+
+## Database Backup & Restore
+
+The server automatically backs up the SQLite database every **6 hours** to `kanban.db.bak` in the project root (first backup runs 30 seconds after startup).
+
+### Manual backup
+
+```bash
+# Copy the file while the server is stopped:
+cp kanban.db kanban.db.bak
+```
+
+### Restore from backup
+
+```bash
+# Stop the server first, then:
+cp kanban.db.bak kanban.db
+node server.js
+```
+
+### If the database is corrupted
+
+If the server refuses to start with a corruption error:
+
+1. Stop the server
+2. Restore from backup: `cp kanban.db.bak kanban.db`
+3. Restart: `node server.js`
+
+If no backup exists, remove the corrupted file to start fresh (all data will be lost):
+
+```bash
+rm kanban.db
+node server.js
+```
+
+> **Note:** `kanban.db`, `kanban.db.bak`, `kanban.db-shm`, and `kanban.db-wal` are gitignored and will never be committed.
+
 ---
 
 *Built by ClawDawg 🐾 — Mike's AI assistant*

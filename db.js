@@ -202,9 +202,22 @@ db.exec(`
     url TEXT NOT NULL,
     events TEXT DEFAULT '[]',
     secret TEXT DEFAULT NULL,
-    createdAt TEXT NOT NULL
+    createdAt TEXT NOT NULL,
+    failCount INTEGER DEFAULT 0,
+    lastFailedAt TEXT DEFAULT NULL
   )
 `);
+
+// Migrate: add failCount and lastFailedAt columns to webhooks if missing
+const webhookCols = db.prepare("PRAGMA table_info(webhooks)").all().map(c => c.name);
+if (!webhookCols.includes('failCount')) {
+  db.exec('ALTER TABLE webhooks ADD COLUMN failCount INTEGER DEFAULT 0');
+  console.log('Migrated: added failCount column to webhooks table');
+}
+if (!webhookCols.includes('lastFailedAt')) {
+  db.exec('ALTER TABLE webhooks ADD COLUMN lastFailedAt TEXT DEFAULT NULL');
+  console.log('Migrated: added lastFailedAt column to webhooks table');
+}
 
 // Agent logs table
 db.exec(`
@@ -229,5 +242,27 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_task_dependencies_blocked_id ON task_dependencies(blocked_id);
   CREATE INDEX IF NOT EXISTS idx_notifications_task_id ON notifications(task_id);
 `);
+
+// Periodic backup — runs every 6 hours using better-sqlite3's native backup API.
+// Writes to kanban.db.bak in the same directory.
+const BACKUP_PATH = path.join(__dirname, 'kanban.db.bak');
+const BACKUP_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours
+
+function runBackup() {
+  db.backup(BACKUP_PATH)
+    .then(() => {
+      console.log(`[kanban] Database backed up to ${BACKUP_PATH}`);
+    })
+    .catch((err) => {
+      console.warn(`[kanban] WARNING: database backup failed: ${err.message}`);
+    });
+}
+
+// Run once at startup (deferred 30s so the server is fully initialised),
+// then on the interval.
+setTimeout(() => {
+  runBackup();
+  setInterval(runBackup, BACKUP_INTERVAL_MS);
+}, 30_000);
 
 module.exports = db;
