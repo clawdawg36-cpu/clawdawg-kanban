@@ -1741,10 +1741,77 @@ const expireStaleLocksStmt = db.prepare(
   "UPDATE tasks SET lockedBy=NULL,lockedAt=NULL,lockExpiresAt=NULL WHERE lockExpiresAt IS NOT NULL AND lockExpiresAt < datetime('now')"
 );
 expireStaleLocksStmt.run(); // clear on startup
-setInterval(() => {
+trackInterval(() => {
   expireStaleLocksStmt.run();
 }, 60000);
 
-app.listen(PORT, '127.0.0.1', () => {
+const server = app.listen(PORT, '127.0.0.1', () => {
   console.log(`Kanban board running at http://127.0.0.1:${PORT}`);
+});
+
+server.on('connection', (socket) => {
+  openSockets.add(socket);
+  socket.on('close', () => openSockets.delete(socket));
+});
+
+async function gracefulShutdown(signal) {
+  if (shutdownPromise) return shutdownPromise;
+
+  isShuttingDown = true;
+  shutdownPromise = (async () => {
+    console.log(`[kanban] Received ${signal}, starting graceful shutdown...`);
+
+    for (const handle of intervalHandles) {
+      clearInterval(handle);
+    }
+    intervalHandles.clear();
+
+    await new Promise((resolve) => {
+      server.close((err) => {
+        if (err) {
+          console.error('[kanban] Error while closing HTTP server:', err);
+        }
+        resolve();
+      });
+
+      for (const socket of openSockets) {
+        socket.end();
+      }
+
+      if (typeof server.closeIdleConnections === 'function') {
+        server.closeIdleConnections();
+      }
+    });
+
+    await waitForActiveRequestsToDrain(10000);
+
+    for (const socket of openSockets) {
+      socket.destroy();
+    }
+
+    try {
+      db.close();
+      console.log('[kanban] SQLite connection closed.');
+      process.exit(0);
+    } catch (err) {
+      console.error('[kanban] Error while closing SQLite connection:', err);
+      process.exit(1);
+    }
+  })();
+
+  return shutdownPromise;
+}
+
+process.on('SIGTERM', () => {
+  gracefulShutdown('SIGTERM').catch((err) => {
+    console.error('[kanban] Graceful shutdown failed:', err);
+    process.exit(1);
+  });
+});
+
+process.on('SIGINT', () => {
+  gracefulShutdown('SIGINT').catch((err) => {
+    console.error('[kanban] Graceful shutdown failed:', err);
+    process.exit(1);
+  });
 });
