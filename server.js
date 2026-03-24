@@ -339,27 +339,32 @@ app.delete('/api/templates/:id', (req, res) => {
 
 // Get all tasks (optionally filtered by projectId)
 app.get('/api/tasks', (req, res) => {
-  const projectId = req.query.projectId || 'default';
-  // Lock expiry is handled by background cleanup (see setInterval below) — no UPDATE here
-  const rows = db.prepare("SELECT * FROM tasks WHERE projectId = ?").all(projectId);
-  // Compute blocked status for each task
-  const doneIds = new Set(rows.filter(r => r.column === 'done').map(r => r.id));
-  res.json(rows.map(row => ({
-    ...row,
-    tags: JSON.parse(row.tags),
-    subtasks: row.subtasks ? JSON.parse(row.subtasks) : null,
-    blockedBy: row.blockedBy ? JSON.parse(row.blockedBy) : [],
-    blocked: (row.blockedBy ? JSON.parse(row.blockedBy) : []).some(id => !doneIds.has(id)),
-    handoffLog: row.handoffLog ? JSON.parse(row.handoffLog) : [],
-    agentStatus: (() => {
-      if (row.column === 'done') return 'done';
-      if (!row.lockedBy) return 'idle';
-      const now = new Date();
-      const expires = row.lockExpiresAt ? new Date(row.lockExpiresAt) : null;
-      if (expires && expires < now) return 'idle'; // lock expired
-      return row.column === 'in-progress' ? 'in-progress' : 'claimed';
-    })(),
-  })));
+  try {
+    const projectId = req.query.projectId || 'default';
+    // Lock expiry is handled by background cleanup (see setInterval below) — no UPDATE here
+    const rows = db.prepare("SELECT * FROM tasks WHERE projectId = ?").all(projectId);
+    // Compute blocked status for each task
+    const doneIds = new Set(rows.filter(r => r.column === 'done').map(r => r.id));
+    res.json(rows.map(row => ({
+      ...row,
+      tags: JSON.parse(row.tags),
+      subtasks: row.subtasks ? JSON.parse(row.subtasks) : null,
+      blockedBy: row.blockedBy ? JSON.parse(row.blockedBy) : [],
+      blocked: (row.blockedBy ? JSON.parse(row.blockedBy) : []).some(id => !doneIds.has(id)),
+      handoffLog: row.handoffLog ? JSON.parse(row.handoffLog) : [],
+      agentStatus: (() => {
+        if (row.column === 'done') return 'done';
+        if (!row.lockedBy) return 'idle';
+        const now = new Date();
+        const expires = row.lockExpiresAt ? new Date(row.lockExpiresAt) : null;
+        if (expires && expires < now) return 'idle'; // lock expired
+        return row.column === 'in-progress' ? 'in-progress' : 'claimed';
+      })(),
+    })));
+  } catch (err) {
+    console.error('GET /api/tasks error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
 // POST /api/tasks/:id/claim — atomically lock a card
