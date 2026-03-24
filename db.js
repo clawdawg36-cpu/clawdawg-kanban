@@ -219,4 +219,15 @@ db.exec(`
   )
 `);
 
+// Indexes for common query patterns
+db.exec(`
+  CREATE INDEX IF NOT EXISTS idx_tasks_projectId ON tasks(projectId);
+  CREATE INDEX IF NOT EXISTS idx_tasks_column ON tasks("column");
+  CREATE INDEX IF NOT EXISTS idx_tasks_wave ON tasks(wave);
+  CREATE INDEX IF NOT EXISTS idx_card_activity_taskId ON card_activity(taskId);
+  CREATE INDEX IF NOT EXISTS idx_agent_logs_taskId ON agent_logs(taskId);
+  CREATE INDEX IF NOT EXISTS idx_task_dependencies_blocked_id ON task_dependencies(blocked_id);
+  CREATE INDEX IF NOT EXISTS idx_notifications_task_id ON notifications(task_id);
+`);
+
 module.exports = db;
