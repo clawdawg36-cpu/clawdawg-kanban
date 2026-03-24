@@ -249,6 +249,7 @@ app.post('/api/tasks/:id/release', (req, res) => {
 
 // Create task
 app.post('/api/tasks', (req, res) => {
+  const blockedByArr = Array.isArray(req.body.blockedBy) ? req.body.blockedBy : [];
   const task = {
     id: Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
     title: req.body.title || 'Untitled',
@@ -262,10 +263,19 @@ app.post('/api/tasks', (req, res) => {
     subtasks: req.body.subtasks || null,
     projectId: req.body.projectId || 'default',
     wave: req.body.wave !== undefined ? req.body.wave : null,
+    blockedBy: blockedByArr,
   };
   db.prepare(
-    'INSERT INTO tasks (id, title, description, assignee, priority, tags, "column", createdAt, recurring, subtasks, projectId, wave) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-  ).run(task.id, task.title, task.description, task.assignee, task.priority, JSON.stringify(task.tags), task.column, task.createdAt, task.recurring, task.subtasks ? JSON.stringify(task.subtasks) : null, task.projectId, task.wave);
+    'INSERT INTO tasks (id, title, description, assignee, priority, tags, "column", createdAt, recurring, subtasks, projectId, wave, blockedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+  ).run(task.id, task.title, task.description, task.assignee, task.priority, JSON.stringify(task.tags), task.column, task.createdAt, task.recurring, task.subtasks ? JSON.stringify(task.subtasks) : null, task.projectId, task.wave, JSON.stringify(blockedByArr));
+
+  // Sync blockedBy to task_dependencies
+  for (const blockerId of blockedByArr) {
+    const blockerExists = db.prepare('SELECT id FROM tasks WHERE id = ?').get(blockerId);
+    if (blockerExists) {
+      db.prepare('INSERT OR IGNORE INTO task_dependencies (blocker_id, blocked_id) VALUES (?, ?)').run(blockerId, task.id);
+    }
+  }
 
   // Log card creation
   const actId = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
@@ -414,48 +424,48 @@ app.get('/api/tasks/:id', (req, res) => {
 
 // POST /api/tasks/:id/spawn — spawn an agent for this card
 app.post('/api/tasks/:id/spawn', async (req, res) => {
-  const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id);
-  if (!task) return res.status(404).json({ error: 'Not found' });
-
-  // Check if already locked
-  const now = new Date();
-  if (task.lockedBy && task.lockExpiresAt && new Date(task.lockExpiresAt) > now) {
-    return res.status(409).json({ error: 'Task already claimed', lockedBy: task.lockedBy });
-  }
-
-  // Read project agentConfig for model/timeout overrides
-  const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(task.projectId || 'default');
-  const agentConfig = project && project.agentConfig ? JSON.parse(project.agentConfig) : {};
-
-  // Read auth token
-  let authToken = process.env.OPENCLAW_TOKEN;
-  if (!authToken) {
-    try {
-      const configPath = require('path').join(require('os').homedir(), '.openclaw', 'openclaw.json');
-      const config = JSON.parse(require('fs').readFileSync(configPath, 'utf8'));
-      authToken = config?.auth?.token || config?.gateway?.auth?.token ||
-        (config?.auth?.profiles && Object.values(config.auth.profiles)[0]?.token);
-    } catch(e) { /* no token found */ }
-  }
-
-  // Build spawn payload
-  const taskDetails = [
-    `# Task: ${task.title}`,
-    task.description ? `\n## Description\n${task.description}` : '',
-    `\n## Card ID\n${task.id}`,
-    `\n## Project\n${task.projectId || 'default'}`,
-    `\n## Priority\n${task.priority}`,
-    task.tags ? `\n## Tags\n${JSON.parse(task.tags || '[]').join(', ')}` : '',
-  ].join('');
-
-  const spawnPayload = {
-    task: `Read /Users/mike/.openclaw/workspace/SUBAGENTS.md first.\n\n${taskDetails}`,
-    mode: 'run',
-    ...(agentConfig.model ? { model: agentConfig.model } : {}),
-    ...(agentConfig.timeoutSeconds ? { runTimeoutSeconds: agentConfig.timeoutSeconds } : {}),
-  };
-
   try {
+    const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id);
+    if (!task) return res.status(404).json({ error: 'Not found' });
+
+    // Check if already locked
+    const now = new Date();
+    if (task.lockedBy && task.lockExpiresAt && new Date(task.lockExpiresAt) > now) {
+      return res.status(409).json({ error: 'Task already claimed', lockedBy: task.lockedBy });
+    }
+
+    // Read project agentConfig for model/timeout overrides
+    const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(task.projectId || 'default');
+    const agentConfig = project && project.agentConfig ? JSON.parse(project.agentConfig) : {};
+
+    // Read auth token
+    let authToken = process.env.OPENCLAW_TOKEN;
+    if (!authToken) {
+      try {
+        const configPath = require('path').join(require('os').homedir(), '.openclaw', 'openclaw.json');
+        const config = JSON.parse(require('fs').readFileSync(configPath, 'utf8'));
+        authToken = config?.auth?.token || config?.gateway?.auth?.token ||
+          (config?.auth?.profiles && Object.values(config.auth.profiles)[0]?.token);
+      } catch(e) { /* no token found */ }
+    }
+
+    // Build spawn payload
+    const taskDetails = [
+      `# Task: ${task.title}`,
+      task.description ? `\n## Description\n${task.description}` : '',
+      `\n## Card ID\n${task.id}`,
+      `\n## Project\n${task.projectId || 'default'}`,
+      `\n## Priority\n${task.priority}`,
+      task.tags ? `\n## Tags\n${JSON.parse(task.tags || '[]').join(', ')}` : '',
+    ].join('');
+
+    const spawnPayload = {
+      task: `Read /Users/mike/.openclaw/workspace/SUBAGENTS.md first.\n\n${taskDetails}`,
+      mode: 'run',
+      ...(agentConfig.model ? { model: agentConfig.model } : {}),
+      ...(agentConfig.timeoutSeconds ? { runTimeoutSeconds: agentConfig.timeoutSeconds } : {}),
+    };
+
     // Call gateway spawn endpoint
     const gatewayRes = await fetch('http://localhost:18789/api/sessions/spawn', {
       method: 'POST',
@@ -481,58 +491,70 @@ app.post('/api/tasks/:id/spawn', async (req, res) => {
       .run(sessionId, nowIso, expiresAt, sessionId, nowIso, 'in-progress', task.id);
 
     res.json({ sessionId, taskId: task.id, status: 'spawned' });
-  } catch(e) {
-    res.status(502).json({ error: 'Failed to reach gateway', details: e.message });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 
 // POST /api/tasks/:id/handoff — append handoff note
 app.post('/api/tasks/:id/handoff', (req, res) => {
-  const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id);
-  if (!task) return res.status(404).json({ error: 'Not found' });
+  try {
+    const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id);
+    if (!task) return res.status(404).json({ error: 'Not found' });
 
-  const entry = {
-    agentId: req.body.agentId || 'unknown',
-    timestamp: new Date().toISOString(),
-    message: (req.body.message || '').trim(),
-  };
-  if (!entry.message) return res.status(400).json({ error: 'message required' });
+    const entry = {
+      agentId: req.body.agentId || 'unknown',
+      timestamp: new Date().toISOString(),
+      message: (req.body.message || '').trim(),
+    };
+    if (!entry.message) return res.status(400).json({ error: 'message required' });
 
-  const log = task.handoffLog ? JSON.parse(task.handoffLog) : [];
-  log.push(entry);
+    const log = task.handoffLog ? JSON.parse(task.handoffLog) : [];
+    log.push(entry);
 
-  db.prepare('UPDATE tasks SET handoffLog = ? WHERE id = ?').run(JSON.stringify(log), task.id);
+    db.prepare('UPDATE tasks SET handoffLog = ? WHERE id = ?').run(JSON.stringify(log), task.id);
 
-  res.status(201).json(entry);
+    res.status(201).json(entry);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ─── Agent Logs ───────────────────────────────────────────────────────────────
 
 // POST /api/tasks/:id/logs — append a log entry (called by agents)
 app.post('/api/tasks/:id/logs', (req, res) => {
-  const task = db.prepare('SELECT id FROM tasks WHERE id = ?').get(req.params.id);
-  if (!task) return res.status(404).json({ error: 'Not found' });
+  try {
+    const task = db.prepare('SELECT id FROM tasks WHERE id = ?').get(req.params.id);
+    if (!task) return res.status(404).json({ error: 'Not found' });
 
-  const entry = {
-    taskId: req.params.id,
-    agentSessionId: req.body.agentSessionId || null,
-    level: ['info', 'warn', 'error'].includes(req.body.level) ? req.body.level : 'info',
-    message: (req.body.message || '').trim(),
-    timestamp: new Date().toISOString(),
-  };
-  if (!entry.message) return res.status(400).json({ error: 'message required' });
+    const entry = {
+      taskId: req.params.id,
+      agentSessionId: req.body.agentSessionId || null,
+      level: ['info', 'warn', 'error'].includes(req.body.level) ? req.body.level : 'info',
+      message: (req.body.message || '').trim(),
+      timestamp: new Date().toISOString(),
+    };
+    if (!entry.message) return res.status(400).json({ error: 'message required' });
 
-  const result = db.prepare(
-    'INSERT INTO agent_logs (taskId, agentSessionId, level, message, timestamp) VALUES (?, ?, ?, ?, ?)'
-  ).run(entry.taskId, entry.agentSessionId, entry.level, entry.message, entry.timestamp);
+    const result = db.prepare(
+      'INSERT INTO agent_logs (taskId, agentSessionId, level, message, timestamp) VALUES (?, ?, ?, ?, ?)'
+    ).run(entry.taskId, entry.agentSessionId, entry.level, entry.message, entry.timestamp);
 
-  res.status(201).json({ id: result.lastInsertRowid, ...entry });
+    res.status(201).json({ id: result.lastInsertRowid, ...entry });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // GET /api/tasks/:id/logs — get all log entries for a task
 app.get('/api/tasks/:id/logs', (req, res) => {
-  const rows = db.prepare('SELECT * FROM agent_logs WHERE taskId = ? ORDER BY timestamp ASC').all(req.params.id);
-  res.json(rows);
+  try {
+    const rows = db.prepare('SELECT * FROM agent_logs WHERE taskId = ? ORDER BY timestamp ASC').all(req.params.id);
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Delete task
@@ -693,29 +715,41 @@ app.delete('/api/attachments/:id', (req, res) => {
 // ─── Webhooks ─────────────────────────────────────────────────────────────────
 
 app.get('/api/webhooks', (req, res) => {
-  const projectId = req.query.projectId || 'default';
-  const rows = db.prepare('SELECT * FROM webhooks WHERE projectId = ? ORDER BY createdAt ASC').all(projectId);
-  res.json(rows.map(r => ({ ...r, events: JSON.parse(r.events) })));
+  try {
+    const projectId = req.query.projectId || 'default';
+    const rows = db.prepare('SELECT * FROM webhooks WHERE projectId = ? ORDER BY createdAt ASC').all(projectId);
+    res.json(rows.map(r => ({ ...r, events: JSON.parse(r.events) })));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.post('/api/webhooks', (req, res) => {
-  const hook = {
-    id: Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
-    projectId: req.body.projectId || 'default',
-    url: req.body.url || '',
-    events: req.body.events || [],
-    secret: req.body.secret || null,
-    createdAt: new Date().toISOString(),
-  };
-  if (!hook.url) return res.status(400).json({ error: 'url required' });
-  db.prepare('INSERT INTO webhooks (id, projectId, url, events, secret, createdAt) VALUES (?, ?, ?, ?, ?, ?)')
-    .run(hook.id, hook.projectId, hook.url, JSON.stringify(hook.events), hook.secret, hook.createdAt);
-  res.status(201).json({ ...hook });
+  try {
+    const hook = {
+      id: Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
+      projectId: req.body.projectId || 'default',
+      url: req.body.url || '',
+      events: req.body.events || [],
+      secret: req.body.secret || null,
+      createdAt: new Date().toISOString(),
+    };
+    if (!hook.url) return res.status(400).json({ error: 'url required' });
+    db.prepare('INSERT INTO webhooks (id, projectId, url, events, secret, createdAt) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(hook.id, hook.projectId, hook.url, JSON.stringify(hook.events), hook.secret, hook.createdAt);
+    res.status(201).json({ ...hook });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.delete('/api/webhooks/:id', (req, res) => {
-  db.prepare('DELETE FROM webhooks WHERE id = ?').run(req.params.id);
-  res.status(204).end();
+  try {
+    db.prepare('DELETE FROM webhooks WHERE id = ?').run(req.params.id);
+    res.status(204).end();
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ─── Stats Dashboard ─────────────────────────────────────────────────────────
