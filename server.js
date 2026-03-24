@@ -381,6 +381,58 @@ app.delete('/api/projects/:id', (req, res) => {
   }
 });
 
+// GET /api/projects/:id/waves — wave progress status
+app.get('/api/projects/:id/waves', (req, res) => {
+  try {
+    const projectId = req.params.id;
+    // Verify project exists
+    const project = db.prepare('SELECT id FROM projects WHERE id = ?').get(projectId);
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+
+    // GROUP BY wave + column to get counts
+    const rows = db.prepare(`
+      SELECT
+        wave,
+        column AS col,
+        COUNT(*) AS cnt
+      FROM tasks
+      WHERE projectId = ?
+      GROUP BY wave, column
+    `).all(projectId);
+
+    // Aggregate into wave objects
+    const waveMap = new Map();
+    for (const row of rows) {
+      const key = row.wave === null || row.wave === undefined ? null : row.wave;
+      if (!waveMap.has(key)) {
+        waveMap.set(key, { wave: key, total: 0, done: 0, inProgress: 0, inReview: 0, blocked: 0, idea: 0, backlog: 0 });
+      }
+      const entry = waveMap.get(key);
+      entry.total += row.cnt;
+      const col = row.col;
+      if (col === 'done')          entry.done        += row.cnt;
+      else if (col === 'in-progress') entry.inProgress  += row.cnt;
+      else if (col === 'in-review')   entry.inReview    += row.cnt;
+      else if (col === 'blocked')  entry.blocked     += row.cnt;
+      else if (col === 'idea')     entry.idea        += row.cnt;
+      else if (col === 'backlog')  entry.backlog     += row.cnt;
+    }
+
+    // Sort: numeric waves first (ascending), null wave last
+    const result = Array.from(waveMap.values()).sort((a, b) => {
+      if (a.wave === null && b.wave === null) return 0;
+      if (a.wave === null) return 1;
+      if (b.wave === null) return -1;
+      return a.wave - b.wave;
+    });
+
+    res.json(result);
+  } catch (err) {
+    console.error('GET /api/projects/:id/waves error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // ─── Templates ───────────────────────────────────────────────────────────────
 
 // GET /api/templates?projectId=x
@@ -431,29 +483,123 @@ app.delete('/api/templates/:id', (req, res) => {
 
 // ─── Tasks ────────────────────────────────────────────────────────────────────
 
-// Get all tasks (optionally filtered by projectId)
+// Get all tasks (optionally filtered by projectId and server-side filter params)
+// Supported query params:
+//   ?projectId=default       — project scope (default: "default")
+//   ?column=backlog          — exact column match
+//   ?wave=1                  — exact wave match (integer)
+//   ?blocked=false|true      — filter by computed blocked status
+//   ?locked=false|true       — filter by lock state (locked=false means no active lock)
+//   ?assignee=ClawDawg       — exact assignee match
+//   ?priority=high           — exact priority match
+//   ?tag=agent               — JSON array contains check (case-sensitive)
+//   ?agentStatus=idle|in-progress|claimed|done — computed agent status filter
+//   ?dueBefore=2025-12-31    — tasks with dueDate before this date (YYYY-MM-DD)
+// All params are optional and combinable.
 app.get('/api/tasks', (req, res) => {
   try {
     const projectId = req.query.projectId || 'default';
+
+    // Build SQL WHERE clauses incrementally
+    const conditions = ['projectId = ?'];
+    const params = [projectId];
+
+    // ?column=backlog
+    if (req.query.column !== undefined) {
+      conditions.push('"column" = ?');
+      params.push(req.query.column);
+    }
+
+    // ?wave=1
+    if (req.query.wave !== undefined) {
+      const waveVal = req.query.wave === 'null' ? null : parseInt(req.query.wave, 10);
+      if (waveVal === null) {
+        conditions.push('wave IS NULL');
+      } else if (!isNaN(waveVal)) {
+        conditions.push('wave = ?');
+        params.push(waveVal);
+      }
+    }
+
+    // ?assignee=ClawDawg
+    if (req.query.assignee !== undefined) {
+      conditions.push('assignee = ?');
+      params.push(req.query.assignee);
+    }
+
+    // ?priority=high
+    if (req.query.priority !== undefined) {
+      conditions.push('priority = ?');
+      params.push(req.query.priority);
+    }
+
+    // ?tag=agent — JSON array contains check using LIKE
+    if (req.query.tag !== undefined) {
+      // Matches '"agent"' inside the JSON array string
+      conditions.push('tags LIKE ?');
+      params.push(`%"${req.query.tag}"%`);
+    }
+
+    // ?locked=false — no active lock; ?locked=true — has active (non-expired) lock
+    if (req.query.locked !== undefined) {
+      if (req.query.locked === 'false') {
+        conditions.push("(lockExpiresAt IS NULL OR lockExpiresAt < datetime('now'))");
+      } else if (req.query.locked === 'true') {
+        conditions.push("(lockExpiresAt IS NOT NULL AND lockExpiresAt >= datetime('now'))");
+      }
+    }
+
+    // ?dueBefore=2025-12-31
+    if (req.query.dueBefore !== undefined) {
+      conditions.push('dueDate IS NOT NULL AND dueDate < ?');
+      params.push(req.query.dueBefore);
+    }
+
     // Lock expiry is handled by background cleanup (see setInterval below) — no UPDATE here
-    const rows = db.prepare("SELECT * FROM tasks WHERE projectId = ?").all(projectId);
-    // Compute blocked status for each task
-    const doneIds = new Set(rows.filter(r => r.column === 'done').map(r => r.id));
+    const sql = `SELECT * FROM tasks WHERE ${conditions.join(' AND ')}`;
+    let rows = db.prepare(sql).all(...params);
+
+    // Compute blocked status for each task (needed for ?blocked filter and response shape)
+    // Fetch done IDs scoped to the same project for accurate blocked computation
+    const allProjectRows = (conditions.length === 1)
+      ? rows  // no extra filters — rows IS the full project set
+      : db.prepare('SELECT id, "column", blockedBy FROM tasks WHERE projectId = ?').all(projectId);
+    const doneIds = new Set(allProjectRows.filter(r => r.column === 'done').map(r => r.id));
+
+    // Compute agentStatus for each row
+    const computeAgentStatus = (row) => {
+      if (row.column === 'done') return 'done';
+      if (!row.lockedBy) return 'idle';
+      const now = new Date();
+      const expires = row.lockExpiresAt ? new Date(row.lockExpiresAt) : null;
+      if (expires && expires < now) return 'idle'; // lock expired
+      return row.column === 'in-progress' ? 'in-progress' : 'claimed';
+    };
+
+    const computeBlocked = (row) => {
+      const blockedBy = row.blockedBy ? JSON.parse(row.blockedBy) : [];
+      return blockedBy.some(id => !doneIds.has(id));
+    };
+
+    // Apply post-SQL filters that require computed values
+    if (req.query.blocked !== undefined) {
+      const wantBlocked = req.query.blocked === 'true';
+      rows = rows.filter(row => computeBlocked(row) === wantBlocked);
+    }
+
+    if (req.query.agentStatus !== undefined) {
+      const wantStatus = req.query.agentStatus;
+      rows = rows.filter(row => computeAgentStatus(row) === wantStatus);
+    }
+
     res.json(rows.map(row => ({
       ...row,
       tags: JSON.parse(row.tags),
       subtasks: row.subtasks ? JSON.parse(row.subtasks) : null,
       blockedBy: row.blockedBy ? JSON.parse(row.blockedBy) : [],
-      blocked: (row.blockedBy ? JSON.parse(row.blockedBy) : []).some(id => !doneIds.has(id)),
+      blocked: computeBlocked(row),
       handoffLog: row.handoffLog ? JSON.parse(row.handoffLog) : [],
-      agentStatus: (() => {
-        if (row.column === 'done') return 'done';
-        if (!row.lockedBy) return 'idle';
-        const now = new Date();
-        const expires = row.lockExpiresAt ? new Date(row.lockExpiresAt) : null;
-        if (expires && expires < now) return 'idle'; // lock expired
-        return row.column === 'in-progress' ? 'in-progress' : 'claimed';
-      })(),
+      agentStatus: computeAgentStatus(row),
     })));
   } catch (err) {
     console.error('GET /api/tasks error:', err);
@@ -497,6 +643,111 @@ app.post('/api/tasks/:id/claim', (req, res) => {
   }
 });
 
+// POST /api/tasks/claim-next — atomic queue-pop for agents
+// Accepts { agentSessionId, projectId, wave?, assignee?, tags?, priority? }
+// Inside a BEGIN IMMEDIATE transaction: finds the highest-priority available
+// (unlocked, not blocked, backlog column) task matching filters, claims it,
+// and returns it. Returns 204 if no matching task is available.
+app.post('/api/tasks/claim-next', (req, res) => {
+  try {
+    const { agentSessionId, projectId, wave, assignee, tags, priority } = req.body;
+
+    if (!agentSessionId || typeof agentSessionId !== 'string' || agentSessionId.trim() === '') {
+      return res.status(400).json({ error: 'agentSessionId is required and must be a non-empty string' });
+    }
+
+    const resolvedProjectId = projectId || 'default';
+
+    const PRIORITY_ORDER = ['urgent', 'high', 'medium', 'low'];
+
+    // Use BEGIN IMMEDIATE to prevent TOCTOU races between concurrent agents
+    const claimNext = db.transaction(() => {
+      // Fetch all backlog tasks for this project
+      let rows = db.prepare(
+        `SELECT * FROM tasks WHERE projectId = ? AND "column" = 'backlog'`
+      ).all(resolvedProjectId);
+
+      // Filter out locked tasks (unexpired locks only)
+      const now = new Date();
+      rows = rows.filter(row => {
+        if (!row.lockedBy) return true;
+        const expires = row.lockExpiresAt ? new Date(row.lockExpiresAt) : null;
+        return expires && expires < now; // lock expired → available
+      });
+
+      // Filter out blocked tasks (any blocker not yet done)
+      const doneIds = new Set(
+        db.prepare(`SELECT id FROM tasks WHERE projectId = ? AND "column" = 'done'`).all(resolvedProjectId).map(r => r.id)
+      );
+      rows = rows.filter(row => {
+        const blockedBy = row.blockedBy ? JSON.parse(row.blockedBy) : [];
+        return !blockedBy.some(id => !doneIds.has(id));
+      });
+
+      // Apply optional filters
+      if (wave !== undefined && wave !== null) {
+        rows = rows.filter(row => row.wave === wave);
+      }
+      if (assignee !== undefined && assignee !== null) {
+        rows = rows.filter(row => row.assignee === assignee);
+      }
+      if (priority !== undefined && priority !== null) {
+        rows = rows.filter(row => row.priority === priority);
+      }
+      if (tags !== undefined && tags !== null && Array.isArray(tags) && tags.length > 0) {
+        rows = rows.filter(row => {
+          const taskTags = row.tags ? JSON.parse(row.tags) : [];
+          return tags.every(t => taskTags.includes(t));
+        });
+      }
+
+      if (rows.length === 0) return null;
+
+      // Sort by priority (highest first), then by createdAt (oldest first) as tiebreaker
+      rows.sort((a, b) => {
+        const pa = PRIORITY_ORDER.indexOf(a.priority);
+        const pb = PRIORITY_ORDER.indexOf(b.priority);
+        if (pa !== pb) return pa - pb;
+        return new Date(a.createdAt) - new Date(b.createdAt);
+      });
+
+      const best = rows[0];
+      const claimNow = new Date().toISOString();
+      const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+
+      // Atomic claim: UPDATE only if still unlocked or lock expired
+      const result = db.prepare(
+        `UPDATE tasks SET lockedBy = ?, lockedAt = ?, lockExpiresAt = ?, agentSessionId = ?, agentStartedAt = ?, "column" = 'in-progress'
+         WHERE id = ? AND (lockedBy IS NULL OR lockExpiresAt < datetime('now'))`
+      ).run(agentSessionId, claimNow, expiresAt, agentSessionId, claimNow, best.id);
+
+      if (result.changes === 0) {
+        // Another agent snuck in — return null to signal caller to retry or give up
+        return null;
+      }
+
+      return db.prepare('SELECT * FROM tasks WHERE id = ?').get(best.id);
+    });
+
+    const claimed = claimNext();
+
+    if (!claimed) {
+      return res.status(204).end();
+    }
+
+    res.json({
+      ...claimed,
+      tags: JSON.parse(claimed.tags),
+      subtasks: claimed.subtasks ? JSON.parse(claimed.subtasks) : null,
+      blockedBy: claimed.blockedBy ? JSON.parse(claimed.blockedBy) : [],
+      handoffLog: claimed.handoffLog ? JSON.parse(claimed.handoffLog) : [],
+    });
+  } catch (err) {
+    console.error('POST /api/tasks/claim-next error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // POST /api/tasks/:id/release — release a lock
 app.post('/api/tasks/:id/release', (req, res) => {
   try {
@@ -520,6 +771,48 @@ app.post('/api/tasks/:id/release', (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// POST /api/tasks/:id/keepalive — extend the lock expiry for a long-running agent
+app.post('/api/tasks/:id/keepalive', (req, res) => {
+  try {
+    const { agentSessionId } = req.body;
+
+    if (!agentSessionId || typeof agentSessionId !== 'string' || agentSessionId.trim() === '') {
+      return res.status(400).json({ error: 'agentSessionId is required and must be a non-empty string' });
+    }
+
+    const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id);
+    if (!task) return res.status(404).json({ error: 'Not found' });
+
+    // 409 if lock has already expired (or was never set)
+    const now = new Date();
+    const expires = task.lockExpiresAt ? new Date(task.lockExpiresAt) : null;
+    if (!task.lockedBy || !expires || expires < now) {
+      return res.status(409).json({ error: 'Lock has already expired or task is not locked' });
+    }
+
+    // 403 if session ID doesn't match the current lock owner
+    if (task.lockedBy !== agentSessionId) {
+      return res.status(403).json({ error: 'agentSessionId does not match lock owner' });
+    }
+
+    // Extend lockExpiresAt by 10 minutes from now
+    const newExpiry = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+    db.prepare('UPDATE tasks SET lockExpiresAt = ? WHERE id = ?').run(newExpiry, req.params.id);
+
+    const updated = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id);
+    res.json({
+      ...updated,
+      tags: JSON.parse(updated.tags),
+      subtasks: updated.subtasks ? JSON.parse(updated.subtasks) : null,
+      blockedBy: updated.blockedBy ? JSON.parse(updated.blockedBy) : [],
+      handoffLog: updated.handoffLog ? JSON.parse(updated.handoffLog) : [],
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -585,6 +878,19 @@ app.put('/api/tasks/:id', (req, res) => {
   try {
   const existing = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id);
   if (!existing) return res.status(404).json({ error: 'Not found' });
+
+  // Input validation
+  if (req.body.priority !== undefined && !VALID_PRIORITIES.includes(req.body.priority)) {
+    return res.status(400).json({ error: `Invalid priority. Must be one of: ${VALID_PRIORITIES.join(', ')}` });
+  }
+  if (req.body.column !== undefined && !VALID_COLUMNS.includes(req.body.column)) {
+    return res.status(400).json({ error: `Invalid column. Must be one of: ${VALID_COLUMNS.join(', ')}` });
+  }
+  if (req.body.wave !== undefined && req.body.wave !== null) {
+    if (!Number.isInteger(req.body.wave) || req.body.wave < 0) {
+      return res.status(400).json({ error: 'Invalid wave. Must be null or a non-negative integer' });
+    }
+  }
 
   // Allowlist of client-settable fields — protects lock/agent fields from mass-assignment
   const ALLOWED_UPDATE_FIELDS = ['title', 'description', 'assignee', 'priority', 'tags', 'column', 'dueDate', 'recurring', 'subtasks', 'projectId', 'blockedBy', 'wave'];
@@ -760,6 +1066,15 @@ app.post('/api/tasks/:id/spawn', async (req, res) => {
     const now = new Date();
     if (task.lockedBy && task.lockExpiresAt && new Date(task.lockExpiresAt) > now) {
       return res.status(409).json({ error: 'Task already claimed', lockedBy: task.lockedBy });
+    }
+
+    // Check if task has unresolved blockers
+    const activeBlockers = db.prepare(
+      "SELECT td.blocker_id FROM task_dependencies td INNER JOIN tasks t ON t.id = td.blocker_id WHERE td.blocked_id = ? AND t.column != 'done'"
+    ).all(req.params.id);
+    if (activeBlockers.length > 0) {
+      const activeBlockerIds = activeBlockers.map(r => r.blocker_id);
+      return res.status(409).json({ error: 'Task is blocked', blockedBy: activeBlockerIds });
     }
 
     // Read project agentConfig for model/timeout overrides
