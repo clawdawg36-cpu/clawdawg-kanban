@@ -4,6 +4,7 @@ const fs = require('fs');
 const multer = require('multer');
 const helmet = require('helmet');
 const cors = require('cors');
+const { rateLimit } = require('express-rate-limit');
 const db = require('./db');
 
 // ─── Multer config for file uploads ──────────────────────────────────────────
@@ -86,9 +87,54 @@ app.use('/api', (req, res, next) => {
   const token = process.env.KANBAN_API_KEY;
   if (!token) return next(); // no key configured = open mode
   const auth = req.headers.authorization || '';
-  if (auth !== `Bearer ${token}`) return res.status(401).json({ error: 'Unauthorized' });
+  const provided = Buffer.from(auth.replace('Bearer ', ''), 'utf8');
+  const expected = Buffer.from(token, 'utf8');
+  if (provided.length !== expected.length || !require('crypto').timingSafeEqual(provided, expected)) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
   next();
 });
+
+// ─── Rate Limiting ────────────────────────────────────────────────────────────
+
+// General limiter: 300 req/min per IP on all /api/* routes
+const generalApiLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 300,
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: (req, res) => res.status(429).json({ error: 'Too many requests' }),
+});
+
+// Strict limiter: 60 req/min per IP on write operations (POST/PUT/DELETE)
+const writeLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: (req, res) => res.status(429).json({ error: 'Too many requests' }),
+});
+
+// Tight limiter: 120 req/min per IP for agent log spam endpoint
+const logLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 120,
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: (req, res) => res.status(429).json({ error: 'Too many requests' }),
+});
+
+// Apply general limiter to all /api/* routes
+app.use('/api', generalApiLimiter);
+
+// Apply write limiter to POST/PUT/DELETE on /api/*
+app.post('/api/*splat', writeLimiter);
+app.put('/api/*splat', writeLimiter);
+app.delete('/api/*splat', writeLimiter);
+
+// Apply tighter limiter to log endpoint specifically (overrides write limiter — applied first, more specific)
+// Note: must be registered before writeLimiter catches it; using specific route here as an additional guard
+app.post('/api/tasks/:id/logs', logLimiter);
 
 // ─── SSE client registry ──────────────────────────────────────────────────────
 // Maps projectId → Set of response objects for connected SSE clients.
@@ -772,12 +818,8 @@ app.get('/api/tasks', (req, res) => {
       params.push(req.query.priority);
     }
 
-    // ?tag=agent — JSON array contains check using LIKE
-    if (req.query.tag !== undefined) {
-      // Matches '"agent"' inside the JSON array string
-      conditions.push('tags LIKE ?');
-      params.push(`%"${req.query.tag}"%`);
-    }
+    // ?tag=agent — filtered in JS after fetch (safe: avoids LIKE injection / ReDoS via unescaped % _ \)
+    // Do NOT add a SQL LIKE condition here; tag filtering happens below after rows are fetched.
 
     // ?locked=false — no active lock; ?locked=true — has active (non-expired) lock
     if (req.query.locked !== undefined) {
@@ -819,6 +861,19 @@ app.get('/api/tasks', (req, res) => {
       const blockedBy = row.blockedBy ? JSON.parse(row.blockedBy) : [];
       return blockedBy.some(id => !doneIds.has(id));
     };
+
+    // ?tag= filter — applied in JS to avoid LIKE injection / ReDoS (tags stored as JSON arrays)
+    if (req.query.tag !== undefined) {
+      const filterTag = req.query.tag;
+      rows = rows.filter(row => {
+        try {
+          const taskTags = JSON.parse(row.tags || '[]');
+          return taskTags.includes(filterTag);
+        } catch {
+          return false;
+        }
+      });
+    }
 
     // Apply post-SQL filters that require computed values
     if (req.query.blocked !== undefined) {
