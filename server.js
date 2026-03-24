@@ -1182,6 +1182,26 @@ app.delete('/api/webhooks/:id', (req, res) => {
   }
 });
 
+// POST /api/webhooks/:id/rotate-secret — generate and store a new secret for an existing webhook.
+// Returns the new plaintext secret ONCE; caller must store it securely.
+app.post('/api/webhooks/:id/rotate-secret', (req, res) => {
+  try {
+    const row = db.prepare('SELECT * FROM webhooks WHERE id = ?').get(req.params.id);
+    if (!row) return res.status(404).json({ error: 'Not found' });
+    const newPlaintext = generateWebhookSecret();
+    const newEncrypted = encryptWebhookSecret(newPlaintext);
+    db.prepare('UPDATE webhooks SET secret = ? WHERE id = ?').run(newEncrypted, req.params.id);
+    res.json({
+      id: row.id,
+      secret: newPlaintext,          // plaintext returned ONCE — store securely
+      secretHint: maskSecret(newEncrypted),
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 // ─── Stats Dashboard ─────────────────────────────────────────────────────────
 app.get('/api/stats', (req, res) => {
   try {
@@ -1285,11 +1305,14 @@ Send a BlueBubbles message to +18183121807:
 })();
 
 // ─── Background lock expiry cleanup ──────────────────────────────────────────
-// Run every 60 seconds to clear stale locks, keeping GET /api/tasks read-only.
+// Run immediately at startup to clear any expired locks from a prior run,
+// then repeat every 60 seconds. Keeps GET /api/tasks read-only.
+const expireStaleLocksStmt = db.prepare(
+  "UPDATE tasks SET lockedBy=NULL,lockedAt=NULL,lockExpiresAt=NULL WHERE lockExpiresAt IS NOT NULL AND lockExpiresAt < datetime(\"now\")"
+);
+expireStaleLocksStmt.run(); // clear on startup
 setInterval(() => {
-  db.prepare(
-    "UPDATE tasks SET lockedBy=NULL,lockedAt=NULL,lockExpiresAt=NULL WHERE lockExpiresAt IS NOT NULL AND lockExpiresAt < datetime(\"now\")"
-  ).run();
+  expireStaleLocksStmt.run();
 }, 60000);
 
 app.listen(PORT, '127.0.0.1', () => {
