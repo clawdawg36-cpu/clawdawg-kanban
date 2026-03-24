@@ -4,7 +4,6 @@ const fs = require('fs');
 const multer = require('multer');
 const helmet = require('helmet');
 const cors = require('cors');
-const { rateLimit } = require('express-rate-limit');
 const db = require('./db');
 
 // ─── Multer config for file uploads ──────────────────────────────────────────
@@ -62,7 +61,6 @@ app.use(helmet({
     directives: {
       defaultSrc: ["'self'"],
       scriptSrc: ["'self'", "'unsafe-inline'"],   // allow inline scripts for the Kanban UI
-      scriptSrcAttr: ["'unsafe-inline'"],          // allow inline onclick/onchange handlers
       styleSrc:  ["'self'", "'unsafe-inline'"],   // allow inline styles
       imgSrc:    ["'self'", "data:", "blob:"],
       connectSrc: ["'self'"],
@@ -87,81 +85,9 @@ app.use('/api', (req, res, next) => {
   const token = process.env.KANBAN_API_KEY;
   if (!token) return next(); // no key configured = open mode
   const auth = req.headers.authorization || '';
-  const provided = Buffer.from(auth.replace('Bearer ', ''), 'utf8');
-  const expected = Buffer.from(token, 'utf8');
-  if (provided.length !== expected.length || !require('crypto').timingSafeEqual(provided, expected)) {
-    return res.status(401).json({ error: 'Unauthorized' });
-  }
+  if (auth !== `Bearer ${token}`) return res.status(401).json({ error: 'Unauthorized' });
   next();
 });
-
-// ─── Rate Limiting ────────────────────────────────────────────────────────────
-
-// General limiter: 300 req/min per IP on all /api/* routes
-const generalApiLimiter = rateLimit({
-  windowMs: 60 * 1000,
-  max: 300,
-  standardHeaders: true,
-  legacyHeaders: false,
-  handler: (req, res) => res.status(429).json({ error: 'Too many requests' }),
-});
-
-// Strict limiter: 60 req/min per IP on write operations (POST/PUT/DELETE)
-const writeLimiter = rateLimit({
-  windowMs: 60 * 1000,
-  max: 60,
-  standardHeaders: true,
-  legacyHeaders: false,
-  handler: (req, res) => res.status(429).json({ error: 'Too many requests' }),
-});
-
-// Tight limiter: 120 req/min per IP for agent log spam endpoint
-const logLimiter = rateLimit({
-  windowMs: 60 * 1000,
-  max: 120,
-  standardHeaders: true,
-  legacyHeaders: false,
-  handler: (req, res) => res.status(429).json({ error: 'Too many requests' }),
-});
-
-// Apply general limiter to all /api/* routes
-app.use('/api', generalApiLimiter);
-
-// Apply write limiter to POST/PUT/DELETE on /api/*
-app.post('/api/*splat', writeLimiter);
-app.put('/api/*splat', writeLimiter);
-app.delete('/api/*splat', writeLimiter);
-
-// Apply tighter limiter to log endpoint specifically (overrides write limiter — applied first, more specific)
-// Note: must be registered before writeLimiter catches it; using specific route here as an additional guard
-app.post('/api/tasks/:id/logs', logLimiter);
-
-// ─── SSE client registry ──────────────────────────────────────────────────────
-// Maps projectId → Set of response objects for connected SSE clients.
-const sseClients = new Map();
-
-function sseSubscribe(projectId, res) {
-  if (!sseClients.has(projectId)) sseClients.set(projectId, new Set());
-  sseClients.get(projectId).add(res);
-}
-
-function sseUnsubscribe(projectId, res) {
-  const set = sseClients.get(projectId);
-  if (set) {
-    set.delete(res);
-    if (set.size === 0) sseClients.delete(projectId);
-  }
-}
-
-// Fan-out an SSE event to all connected clients for a given projectId.
-function sseBroadcast(projectId, eventType, data) {
-  const set = sseClients.get(projectId);
-  if (!set || set.size === 0) return;
-  const payload = `event: ${eventType}\ndata: ${JSON.stringify(data)}\n\n`;
-  for (const res of set) {
-    try { res.write(payload); } catch(e) { /* client already gone */ }
-  }
-}
 
 // ─── Webhook event emitter ────────────────────────────────────────────────────
 const https = require('https');
@@ -267,65 +193,6 @@ async function validateWebhookUrl(rawUrl) {
   });
 }
 
-const MAX_WEBHOOK_FAILURES = 5; // consecutive failures before auto-disable
-
-function _dispatchWebhookRequest(hook, body, sig) {
-  try {
-    const url = new URL(hook.url);
-    // Only fire over https (skip any http hooks that may have been stored before this fix)
-    if (url.protocol !== 'https:') return;
-    // Resolve and check for private IPs before firing
-    dns.lookup(url.hostname, { all: true }, (err, addresses) => {
-      if (err || !addresses || addresses.length === 0) {
-        _recordWebhookFailure(hook.id);
-        return;
-      }
-      for (const { address } of addresses) {
-        if (isPrivateIp(address)) return; // silently drop SSRF-risk hooks
-      }
-      const options = {
-        hostname: url.hostname,
-        port: url.port || 443,
-        path: url.pathname + url.search,
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body), ...(sig ? { 'X-Webhook-Signature': sig } : {}) },
-      };
-      const req = https.request(options, (res) => {
-        // Drain the response to free the socket; treat 2xx as success
-        res.resume();
-        if (res.statusCode >= 200 && res.statusCode < 300) {
-          // Success: reset failure counter
-          db.prepare('UPDATE webhooks SET failCount = 0 WHERE id = ?').run(hook.id);
-        } else {
-          _recordWebhookFailure(hook.id);
-        }
-      });
-      req.setTimeout(5000, () => req.destroy());
-      req.on('error', () => {
-        _recordWebhookFailure(hook.id);
-      });
-      req.write(body);
-      req.end();
-    });
-  } catch(e) { /* ignore bad URLs */ }
-}
-
-function _recordWebhookFailure(hookId) {
-  const hook = db.prepare('SELECT id, failCount FROM webhooks WHERE id = ?').get(hookId);
-  if (!hook) return;
-  const newCount = (hook.failCount || 0) + 1;
-  const now = new Date().toISOString();
-  if (newCount >= MAX_WEBHOOK_FAILURES) {
-    // Auto-disable: set events to '[]' so it won't fire, and log a warning
-    db.prepare('UPDATE webhooks SET failCount = ?, lastFailedAt = ?, events = ? WHERE id = ?')
-      .run(newCount, now, '[]', hookId);
-    console.warn(`[webhook] Auto-disabled webhook ${hookId} after ${newCount} consecutive failures`);
-  } else {
-    db.prepare('UPDATE webhooks SET failCount = ?, lastFailedAt = ? WHERE id = ?')
-      .run(newCount, now, hookId);
-  }
-}
-
 function fireWebhook(projectId, eventType, payload) {
   const hooks = db.prepare("SELECT * FROM webhooks WHERE projectId = ? AND (events = '[]' OR events LIKE ?)").all(projectId, `%"${eventType}"%`);
   for (const hook of hooks) {
@@ -333,12 +200,30 @@ function fireWebhook(projectId, eventType, payload) {
     // Decrypt the stored secret before using it for HMAC signing
     const signingKey = decryptWebhookSecret(hook.secret);
     const sig = signingKey ? 'sha256=' + crypto.createHmac('sha256', signingKey).update(body).digest('hex') : null;
-    // Capture hook reference for closure
-    const hookRef = hook;
-    const sigRef = sig;
-    const bodyRef = body;
-    // Dispatch asynchronously after response is sent
-    setImmediate(() => _dispatchWebhookRequest(hookRef, bodyRef, sigRef));
+    try {
+      const url = new URL(hook.url);
+      // Only fire over https (skip any http hooks that may have been stored before this fix)
+      if (url.protocol !== 'https:') continue;
+      // Resolve and check for private IPs before firing
+      dns.lookup(url.hostname, { all: true }, (err, addresses) => {
+        if (err || !addresses || addresses.length === 0) return;
+        for (const { address } of addresses) {
+          if (isPrivateIp(address)) return; // silently drop SSRF-risk hooks
+        }
+        const options = {
+          hostname: url.hostname,
+          port: url.port || 443,
+          path: url.pathname + url.search,
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body), ...(sig ? { 'X-Webhook-Signature': sig } : {}) },
+        };
+        const req = https.request(options);
+        req.setTimeout(5000, () => req.destroy());
+        req.on('error', () => {}); // fire-and-forget
+        req.write(body);
+        req.end();
+      });
+    } catch(e) { /* ignore bad URLs */ }
   }
 }
 
@@ -436,7 +321,6 @@ app.delete('/api/projects/:id', (req, res) => {
         const placeholders = taskIds.map(() => '?').join(', ');
         // Cascade cleanup of child tables referencing task IDs
         db.prepare(`DELETE FROM agent_logs WHERE taskId IN (${placeholders})`).run(...taskIds);
-        db.prepare(`DELETE FROM handoff_log WHERE taskId IN (${placeholders})`).run(...taskIds);
         db.prepare(`DELETE FROM card_activity WHERE taskId IN (${placeholders})`).run(...taskIds);
         db.prepare(`DELETE FROM notifications WHERE task_id IN (${placeholders})`).run(...taskIds);
         db.prepare(`DELETE FROM task_dependencies WHERE blocker_id IN (${placeholders}) OR blocked_id IN (${placeholders})`).run(...taskIds, ...taskIds);
@@ -452,268 +336,6 @@ app.delete('/api/projects/:id', (req, res) => {
     res.status(204).end();
   } catch (err) {
     console.error('DELETE /api/projects/:id error:', err);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-// GET /api/projects/:id/waves — wave progress status
-app.get('/api/projects/:id/waves', (req, res) => {
-  try {
-    const projectId = req.params.id;
-    // Verify project exists
-    const project = db.prepare('SELECT id FROM projects WHERE id = ?').get(projectId);
-    if (!project) return res.status(404).json({ error: 'Project not found' });
-
-    // GROUP BY wave + column to get counts
-    const rows = db.prepare(`
-      SELECT
-        wave,
-        column AS col,
-        COUNT(*) AS cnt
-      FROM tasks
-      WHERE projectId = ?
-      GROUP BY wave, column
-    `).all(projectId);
-
-    // Aggregate into wave objects
-    const waveMap = new Map();
-    for (const row of rows) {
-      const key = row.wave === null || row.wave === undefined ? null : row.wave;
-      if (!waveMap.has(key)) {
-        waveMap.set(key, { wave: key, total: 0, done: 0, inProgress: 0, inReview: 0, blocked: 0, idea: 0, backlog: 0 });
-      }
-      const entry = waveMap.get(key);
-      entry.total += row.cnt;
-      const col = row.col;
-      if (col === 'done')          entry.done        += row.cnt;
-      else if (col === 'in-progress') entry.inProgress  += row.cnt;
-      else if (col === 'in-review')   entry.inReview    += row.cnt;
-      else if (col === 'blocked')  entry.blocked     += row.cnt;
-      else if (col === 'idea')     entry.idea        += row.cnt;
-      else if (col === 'backlog')  entry.backlog     += row.cnt;
-    }
-
-    // Sort: numeric waves first (ascending), null wave last
-    const result = Array.from(waveMap.values()).sort((a, b) => {
-      if (a.wave === null && b.wave === null) return 0;
-      if (a.wave === null) return 1;
-      if (b.wave === null) return -1;
-      return a.wave - b.wave;
-    });
-
-    res.json(result);
-  } catch (err) {
-    console.error('GET /api/projects/:id/waves error:', err);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-// ─── Export / Import ─────────────────────────────────────────────────────────
-
-// GET /api/projects/:id/export?format=json|csv|ics
-// Exports all tasks for the project in the requested format.
-//   json  — full project snapshot (project metadata + tasks array)
-//   csv   — flat CSV with all task fields, one row per task
-//   ics   — iCalendar VTODO output for tasks that have a dueDate
-app.get('/api/projects/:id/export', (req, res) => {
-  try {
-    const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id);
-    if (!project) return res.status(404).json({ error: 'Project not found' });
-
-    const tasks = db.prepare('SELECT * FROM tasks WHERE projectId = ?').all(req.params.id);
-
-    const format = (req.query.format || 'json').toLowerCase();
-
-    if (format === 'json') {
-      const snapshot = {
-        exportedAt: new Date().toISOString(),
-        project: { ...project, agentConfig: project.agentConfig ? JSON.parse(project.agentConfig) : null },
-        tasks: tasks.map(t => ({
-          ...t,
-          tags: JSON.parse(t.tags || '[]'),
-          subtasks: t.subtasks ? JSON.parse(t.subtasks) : null,
-          blockedBy: t.blockedBy ? JSON.parse(t.blockedBy) : [],
-          handoffLog: t.handoffLog ? JSON.parse(t.handoffLog) : [],
-        })),
-      };
-      res.setHeader('Content-Disposition', `attachment; filename="project-${req.params.id}-export.json"`);
-      res.setHeader('Content-Type', 'application/json');
-      return res.json(snapshot);
-    }
-
-    if (format === 'csv') {
-      const CSV_FIELDS = ['id', 'title', 'description', 'assignee', 'priority', 'tags', 'column', 'createdAt', 'dueDate', 'recurring', 'subtasks', 'projectId', 'wave', 'blockedBy'];
-      const escapeCsv = (val) => {
-        if (val === null || val === undefined) return '';
-        const str = String(val).replace(/"/g, '""');
-        return /[,"\n\r]/.test(str) ? `"${str}"` : str;
-      };
-      const header = CSV_FIELDS.join(',');
-      const rows = tasks.map(t => {
-        return CSV_FIELDS.map(f => {
-          if (f === 'tags') return escapeCsv(JSON.parse(t.tags || '[]').join(';'));
-          if (f === 'blockedBy') return escapeCsv((t.blockedBy ? JSON.parse(t.blockedBy) : []).join(';'));
-          if (f === 'subtasks') return escapeCsv(t.subtasks ? JSON.stringify(JSON.parse(t.subtasks)) : '');
-          return escapeCsv(t[f]);
-        }).join(',');
-      });
-      const csv = [header, ...rows].join('\n');
-      res.setHeader('Content-Disposition', `attachment; filename="project-${req.params.id}-export.csv"`);
-      res.setHeader('Content-Type', 'text/csv');
-      return res.send(csv);
-    }
-
-    if (format === 'ics') {
-      // Only export tasks that have a dueDate
-      const dueTasks = tasks.filter(t => t.dueDate);
-
-      const escapeIcs = (str) => (str || '').replace(/\n/g, '\\n').replace(/,/g, '\\,').replace(/;/g, '\\;');
-
-      const foldLine = (line) => {
-        // RFC 5545: lines longer than 75 octets must be folded
-        const out = [];
-        while (line.length > 75) {
-          out.push(line.slice(0, 75));
-          line = ' ' + line.slice(75);
-        }
-        out.push(line);
-        return out.join('\r\n');
-      };
-
-      const uid = () => `${Date.now()}-${Math.random().toString(36).slice(2)}@kanban`;
-
-      const lines = [
-        'BEGIN:VCALENDAR',
-        'VERSION:2.0',
-        'PRODID:-//Kanban Board//Export//EN',
-        'CALSCALE:GREGORIAN',
-        'METHOD:PUBLISH',
-      ];
-
-      for (const t of dueTasks) {
-        const dueDate = t.dueDate.replace(/-/g, '');  // YYYYMMDD
-        const createdAt = new Date(t.createdAt).toISOString().replace(/[-:]/g, '').replace('.000', '');
-        const priority = { urgent: 1, high: 3, medium: 5, low: 9 }[t.priority] || 5;
-        const status = t.column === 'done' ? 'COMPLETED' : 'NEEDS-ACTION';
-        lines.push('BEGIN:VTODO');
-        lines.push(`UID:${uid()}`);
-        lines.push(`DTSTAMP:${createdAt.slice(0, 15)}Z`);
-        lines.push(`CREATED:${createdAt.slice(0, 15)}Z`);
-        lines.push(foldLine(`SUMMARY:${escapeIcs(t.title)}`));
-        if (t.description) lines.push(foldLine(`DESCRIPTION:${escapeIcs(t.description.slice(0, 500))}`));
-        lines.push(`DUE;VALUE=DATE:${dueDate}`);
-        lines.push(`PRIORITY:${priority}`);
-        lines.push(`STATUS:${status}`);
-        lines.push(`CATEGORIES:${escapeIcs((JSON.parse(t.tags || '[]')).join(',') || 'kanban')}`);
-        lines.push('END:VTODO');
-      }
-      lines.push('END:VCALENDAR');
-
-      const ics = lines.join('\r\n');
-      res.setHeader('Content-Disposition', `attachment; filename="project-${req.params.id}-export.ics"`);
-      res.setHeader('Content-Type', 'text/calendar; charset=utf-8');
-      return res.send(ics);
-    }
-
-    return res.status(400).json({ error: 'Invalid format. Use: json, csv, or ics' });
-  } catch (err) {
-    console.error('GET /api/projects/:id/export error:', err);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-// POST /api/projects/:id/import
-// Body: { tasks: [...] }  — array of task objects (fields same as task schema)
-// Creates tasks in bulk; generates new IDs (does not overwrite existing tasks).
-// Returns: { imported: <count>, skipped: <count>, tasks: [...created task ids] }
-app.post('/api/projects/:id/import', (req, res) => {
-  try {
-    const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id);
-    if (!project) return res.status(404).json({ error: 'Project not found' });
-
-    const incoming = req.body;
-    if (!incoming || typeof incoming !== 'object') {
-      return res.status(400).json({ error: 'Request body must be a JSON object' });
-    }
-
-    // Accept { tasks: [...] } or a bare array or a JSON snapshot from our own exporter
-    let taskList = null;
-    if (Array.isArray(incoming)) {
-      taskList = incoming;
-    } else if (Array.isArray(incoming.tasks)) {
-      taskList = incoming.tasks;
-    } else {
-      return res.status(400).json({ error: 'Body must be { tasks: [...] } or a task array' });
-    }
-
-    if (taskList.length === 0) {
-      return res.status(400).json({ error: 'tasks array is empty' });
-    }
-    if (taskList.length > 500) {
-      return res.status(400).json({ error: 'Cannot import more than 500 tasks at once' });
-    }
-
-    const IMPORT_ALLOWED_COLUMNS = new Set(['idea', 'backlog', 'in-progress', 'in-review', 'done']);
-    const IMPORT_ALLOWED_PRIORITIES = new Set(['urgent', 'high', 'medium', 'low']);
-
-    const importTasks = db.transaction(() => {
-      const imported = [];
-      let skipped = 0;
-      const now = new Date().toISOString();
-
-      for (const raw of taskList) {
-        if (!raw || typeof raw !== 'object') { skipped++; continue; }
-        const title = (raw.title || '').trim();
-        if (!title) { skipped++; continue; }
-
-        const col = IMPORT_ALLOWED_COLUMNS.has(raw.column) ? raw.column : 'backlog';
-        const pri = IMPORT_ALLOWED_PRIORITIES.has(raw.priority) ? raw.priority : 'medium';
-        const tags = Array.isArray(raw.tags) ? raw.tags : (typeof raw.tags === 'string' ? raw.tags.split(';').map(t => t.trim()).filter(Boolean) : []);
-        const blockedBy = Array.isArray(raw.blockedBy) ? raw.blockedBy : [];
-        const wave = Number.isInteger(raw.wave) && raw.wave >= 0 ? raw.wave : null;
-        const dueDate = raw.dueDate ? String(raw.dueDate).slice(0, 10) : null;
-        const subtasks = raw.subtasks ? JSON.stringify(raw.subtasks) : null;
-
-        const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
-        db.prepare(
-          'INSERT INTO tasks (id, title, description, assignee, priority, tags, "column", createdAt, dueDate, recurring, subtasks, projectId, wave, blockedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-        ).run(
-          id,
-          title,
-          raw.description || '',
-          raw.assignee || 'Mike',
-          pri,
-          JSON.stringify(tags),
-          col,
-          now,
-          dueDate,
-          raw.recurring || null,
-          subtasks,
-          req.params.id,
-          wave,
-          JSON.stringify(blockedBy)
-        );
-
-        // Log import activity
-        const actId = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
-        db.prepare(
-          'INSERT INTO card_activity (id, taskId, type, content, author, createdAt) VALUES (?, ?, ?, ?, ?, ?)'
-        ).run(actId, id, 'created', `Card imported into ${COL_LABELS[col] || col}`, raw.assignee || 'Mike', now);
-
-        imported.push(id);
-      }
-
-      return { imported, skipped };
-    });
-
-    const result = importTasks();
-    res.status(201).json({
-      imported: result.imported.length,
-      skipped: result.skipped,
-      taskIds: result.imported,
-    });
-  } catch (err) {
-    console.error('POST /api/projects/:id/import error:', err);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -768,151 +390,30 @@ app.delete('/api/templates/:id', (req, res) => {
 
 // ─── Tasks ────────────────────────────────────────────────────────────────────
 
-// Get all tasks (optionally filtered by projectId and server-side filter params)
-// Supported query params:
-//   ?projectId=default       — project scope (default: "default")
-//   ?column=backlog          — exact column match
-//   ?wave=1                  — exact wave match (integer)
-//   ?blocked=false|true      — filter by computed blocked status
-//   ?locked=false|true       — filter by lock state (locked=false means no active lock)
-//   ?assignee=ClawDawg       — exact assignee match
-//   ?priority=high           — exact priority match
-//   ?tag=agent               — JSON array contains check (case-sensitive)
-//   ?agentStatus=idle|in-progress|claimed|done — computed agent status filter
-//   ?dueBefore=2025-12-31    — tasks with dueDate before this date (YYYY-MM-DD)
-// All params are optional and combinable.
+// Get all tasks (optionally filtered by projectId)
 app.get('/api/tasks', (req, res) => {
   try {
     const projectId = req.query.projectId || 'default';
-
-    // Build SQL WHERE clauses incrementally
-    const conditions = ['projectId = ?'];
-    const params = [projectId];
-
-    // ?column=backlog
-    if (req.query.column !== undefined) {
-      conditions.push('"column" = ?');
-      params.push(req.query.column);
-    }
-
-    // ?wave=1
-    if (req.query.wave !== undefined) {
-      const waveVal = req.query.wave === 'null' ? null : parseInt(req.query.wave, 10);
-      if (waveVal === null) {
-        conditions.push('wave IS NULL');
-      } else if (!isNaN(waveVal)) {
-        conditions.push('wave = ?');
-        params.push(waveVal);
-      }
-    }
-
-    // ?assignee=ClawDawg
-    if (req.query.assignee !== undefined) {
-      conditions.push('assignee = ?');
-      params.push(req.query.assignee);
-    }
-
-    // ?priority=high
-    if (req.query.priority !== undefined) {
-      conditions.push('priority = ?');
-      params.push(req.query.priority);
-    }
-
-    // ?tag=agent — filtered in JS after fetch (safe: avoids LIKE injection / ReDoS via unescaped % _ \)
-    // Do NOT add a SQL LIKE condition here; tag filtering happens below after rows are fetched.
-
-    // ?locked=false — no active lock; ?locked=true — has active (non-expired) lock
-    if (req.query.locked !== undefined) {
-      if (req.query.locked === 'false') {
-        conditions.push("(lockExpiresAt IS NULL OR lockExpiresAt < datetime('now'))");
-      } else if (req.query.locked === 'true') {
-        conditions.push("(lockExpiresAt IS NOT NULL AND lockExpiresAt >= datetime('now'))");
-      }
-    }
-
-    // ?dueBefore=2025-12-31
-    if (req.query.dueBefore !== undefined) {
-      conditions.push('dueDate IS NOT NULL AND dueDate < ?');
-      params.push(req.query.dueBefore);
-    }
-
     // Lock expiry is handled by background cleanup (see setInterval below) — no UPDATE here
-    const sql = `SELECT * FROM tasks WHERE ${conditions.join(' AND ')} ORDER BY sortOrder ASC NULLS LAST, createdAt ASC`;
-    let rows = db.prepare(sql).all(...params);
-
-    // Compute blocked status for each task (needed for ?blocked filter and response shape)
-    // Fetch done IDs scoped to the same project for accurate blocked computation
-    const allProjectRows = (conditions.length === 1)
-      ? rows  // no extra filters — rows IS the full project set
-      : db.prepare('SELECT id, "column", blockedBy FROM tasks WHERE projectId = ?').all(projectId);
-    const doneIds = new Set(allProjectRows.filter(r => r.column === 'done').map(r => r.id));
-
-    // Compute agentStatus for each row
-    const computeAgentStatus = (row) => {
-      if (row.column === 'done') return 'done';
-      if (!row.lockedBy) return 'idle';
-      const now = new Date();
-      const expires = row.lockExpiresAt ? new Date(row.lockExpiresAt) : null;
-      if (expires && expires < now) return 'idle'; // lock expired
-      return row.column === 'in-progress' ? 'in-progress' : 'claimed';
-    };
-
-    const computeBlocked = (row) => {
-      const blockedBy = row.blockedBy ? JSON.parse(row.blockedBy) : [];
-      return blockedBy.some(id => !doneIds.has(id));
-    };
-
-    // ?tag= filter — applied in JS to avoid LIKE injection / ReDoS (tags stored as JSON arrays)
-    if (req.query.tag !== undefined) {
-      const filterTag = req.query.tag;
-      rows = rows.filter(row => {
-        try {
-          const taskTags = JSON.parse(row.tags || '[]');
-          return taskTags.includes(filterTag);
-        } catch {
-          return false;
-        }
-      });
-    }
-
-    // Apply post-SQL filters that require computed values
-    if (req.query.blocked !== undefined) {
-      const wantBlocked = req.query.blocked === 'true';
-      rows = rows.filter(row => computeBlocked(row) === wantBlocked);
-    }
-
-    if (req.query.agentStatus !== undefined) {
-      const wantStatus = req.query.agentStatus;
-      rows = rows.filter(row => computeAgentStatus(row) === wantStatus);
-    }
-
-    // Fetch all handoff_log rows for the returned tasks in one query (avoid N+1)
-    const taskIds = rows.map(r => r.id);
-    let handoffByTaskId = {};
-    if (taskIds.length > 0) {
-      const placeholders = taskIds.map(() => '?').join(', ');
-      const handoffRows = db.prepare(`SELECT * FROM handoff_log WHERE taskId IN (${placeholders}) ORDER BY timestamp ASC`).all(...taskIds);
-      for (const h of handoffRows) {
-        if (!handoffByTaskId[h.taskId]) handoffByTaskId[h.taskId] = [];
-        handoffByTaskId[h.taskId].push(h);
-      }
-    }
-
-    res.json(rows.map(row => {
-      // Use new table rows if present, fall back to legacy JSON blob
-      const handoffLog = handoffByTaskId[row.id]
-        ? handoffByTaskId[row.id]
-        : (row.handoffLog ? JSON.parse(row.handoffLog) : []);
-      return {
-        ...row,
-        tags: JSON.parse(row.tags),
-        subtasks: row.subtasks ? JSON.parse(row.subtasks) : null,
-        blockedBy: row.blockedBy ? JSON.parse(row.blockedBy) : [],
-        blocked: computeBlocked(row),
-        handoffLog,
-        agentStatus: computeAgentStatus(row),
-      };
-    }));
+    const rows = db.prepare("SELECT * FROM tasks WHERE projectId = ?").all(projectId);
+    // Compute blocked status for each task
+    const doneIds = new Set(rows.filter(r => r.column === 'done').map(r => r.id));
+    res.json(rows.map(row => ({
+      ...row,
+      tags: JSON.parse(row.tags),
+      subtasks: row.subtasks ? JSON.parse(row.subtasks) : null,
+      blockedBy: row.blockedBy ? JSON.parse(row.blockedBy) : [],
+      blocked: (row.blockedBy ? JSON.parse(row.blockedBy) : []).some(id => !doneIds.has(id)),
+      handoffLog: row.handoffLog ? JSON.parse(row.handoffLog) : [],
+      agentStatus: (() => {
+        if (row.column === 'done') return 'done';
+        if (!row.lockedBy) return 'idle';
+        const now = new Date();
+        const expires = row.lockExpiresAt ? new Date(row.lockExpiresAt) : null;
+        if (expires && expires < now) return 'idle'; // lock expired
+        return row.column === 'in-progress' ? 'in-progress' : 'claimed';
+      })(),
+    })));
   } catch (err) {
     console.error('GET /api/tasks error:', err);
     res.status(500).json({ error: 'Internal server error' });
@@ -955,115 +456,6 @@ app.post('/api/tasks/:id/claim', (req, res) => {
   }
 });
 
-// POST /api/tasks/claim-next — atomic queue-pop for agents
-// Accepts { agentSessionId, projectId, wave?, assignee?, tags?, priority? }
-// Inside a BEGIN IMMEDIATE transaction: finds the highest-priority available
-// (unlocked, not blocked, backlog column) task matching filters, claims it,
-// and returns it. Returns 204 if no matching task is available.
-app.post('/api/tasks/claim-next', (req, res) => {
-  try {
-    const { agentSessionId, projectId, wave, assignee, tags, priority } = req.body;
-
-    if (!agentSessionId || typeof agentSessionId !== 'string' || agentSessionId.trim() === '') {
-      return res.status(400).json({ error: 'agentSessionId is required and must be a non-empty string' });
-    }
-
-    const resolvedProjectId = projectId || 'default';
-
-    const PRIORITY_ORDER = ['urgent', 'high', 'medium', 'low'];
-
-    // Use BEGIN IMMEDIATE to prevent TOCTOU races between concurrent agents
-    const claimNext = db.transaction(() => {
-      // Fetch all backlog tasks for this project
-      let rows = db.prepare(
-        `SELECT * FROM tasks WHERE projectId = ? AND "column" = 'backlog'`
-      ).all(resolvedProjectId);
-
-      // Filter out locked tasks (unexpired locks only)
-      const now = new Date();
-      rows = rows.filter(row => {
-        if (!row.lockedBy) return true;
-        const expires = row.lockExpiresAt ? new Date(row.lockExpiresAt) : null;
-        return expires && expires < now; // lock expired → available
-      });
-
-      // Filter out blocked tasks (any blocker not yet done)
-      const doneIds = new Set(
-        db.prepare(`SELECT id FROM tasks WHERE projectId = ? AND "column" = 'done'`).all(resolvedProjectId).map(r => r.id)
-      );
-      rows = rows.filter(row => {
-        const blockedBy = row.blockedBy ? JSON.parse(row.blockedBy) : [];
-        return !blockedBy.some(id => !doneIds.has(id));
-      });
-
-      // Apply optional filters
-      if (wave !== undefined && wave !== null) {
-        rows = rows.filter(row => row.wave === wave);
-      }
-      if (assignee !== undefined && assignee !== null) {
-        rows = rows.filter(row => row.assignee === assignee);
-      }
-      if (priority !== undefined && priority !== null) {
-        rows = rows.filter(row => row.priority === priority);
-      }
-      if (tags !== undefined && tags !== null && Array.isArray(tags) && tags.length > 0) {
-        rows = rows.filter(row => {
-          const taskTags = row.tags ? JSON.parse(row.tags) : [];
-          return tags.every(t => taskTags.includes(t));
-        });
-      }
-
-      if (rows.length === 0) return null;
-
-      // Sort by priority (highest first), then by createdAt (oldest first) as tiebreaker
-      rows.sort((a, b) => {
-        const pa = PRIORITY_ORDER.indexOf(a.priority);
-        const pb = PRIORITY_ORDER.indexOf(b.priority);
-        if (pa !== pb) return pa - pb;
-        return new Date(a.createdAt) - new Date(b.createdAt);
-      });
-
-      const best = rows[0];
-      const claimNow = new Date().toISOString();
-      const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
-
-      // Atomic claim: UPDATE only if still unlocked or lock expired
-      const result = db.prepare(
-        `UPDATE tasks SET lockedBy = ?, lockedAt = ?, lockExpiresAt = ?, agentSessionId = ?, agentStartedAt = ?, "column" = 'in-progress'
-         WHERE id = ? AND (lockedBy IS NULL OR lockExpiresAt < datetime('now'))`
-      ).run(agentSessionId, claimNow, expiresAt, agentSessionId, claimNow, best.id);
-
-      if (result.changes === 0) {
-        // Another agent snuck in — return null to signal caller to retry or give up
-        return null;
-      }
-
-      return db.prepare('SELECT * FROM tasks WHERE id = ?').get(best.id);
-    });
-
-    const claimed = claimNext();
-
-    if (!claimed) {
-      return res.status(204).end();
-    }
-
-    const claimedHandoffRows = db.prepare('SELECT * FROM handoff_log WHERE taskId = ? ORDER BY timestamp ASC').all(claimed.id);
-    const claimedHandoffLog = claimedHandoffRows.length > 0
-      ? claimedHandoffRows
-      : (claimed.handoffLog ? JSON.parse(claimed.handoffLog) : []);
-    res.json({
-      ...claimed,
-      tags: JSON.parse(claimed.tags),
-      subtasks: claimed.subtasks ? JSON.parse(claimed.subtasks) : null,
-      blockedBy: claimed.blockedBy ? JSON.parse(claimed.blockedBy) : [],
-      handoffLog: claimedHandoffLog,
-    });
-  } catch (err) {
-    console.error('POST /api/tasks/claim-next error:', err);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
 // POST /api/tasks/:id/release — release a lock
 app.post('/api/tasks/:id/release', (req, res) => {
   try {
@@ -1087,48 +479,6 @@ app.post('/api/tasks/:id/release', (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Internal server error" });
-  }
-});
-
-// POST /api/tasks/:id/keepalive — extend the lock expiry for a long-running agent
-app.post('/api/tasks/:id/keepalive', (req, res) => {
-  try {
-    const { agentSessionId } = req.body;
-
-    if (!agentSessionId || typeof agentSessionId !== 'string' || agentSessionId.trim() === '') {
-      return res.status(400).json({ error: 'agentSessionId is required and must be a non-empty string' });
-    }
-
-    const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id);
-    if (!task) return res.status(404).json({ error: 'Not found' });
-
-    // 409 if lock has already expired (or was never set)
-    const now = new Date();
-    const expires = task.lockExpiresAt ? new Date(task.lockExpiresAt) : null;
-    if (!task.lockedBy || !expires || expires < now) {
-      return res.status(409).json({ error: 'Lock has already expired or task is not locked' });
-    }
-
-    // 403 if session ID doesn't match the current lock owner
-    if (task.lockedBy !== agentSessionId) {
-      return res.status(403).json({ error: 'agentSessionId does not match lock owner' });
-    }
-
-    // Extend lockExpiresAt by 10 minutes from now
-    const newExpiry = new Date(Date.now() + 10 * 60 * 1000).toISOString();
-    db.prepare('UPDATE tasks SET lockExpiresAt = ? WHERE id = ?').run(newExpiry, req.params.id);
-
-    const updated = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id);
-    res.json({
-      ...updated,
-      tags: JSON.parse(updated.tags),
-      subtasks: updated.subtasks ? JSON.parse(updated.subtasks) : null,
-      blockedBy: updated.blockedBy ? JSON.parse(updated.blockedBy) : [],
-      handoffLog: updated.handoffLog ? JSON.parse(updated.handoffLog) : [],
-    });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -1181,9 +531,6 @@ app.post('/api/tasks', (req, res) => {
     db.prepare(
       'INSERT INTO card_activity (id, taskId, type, content, author, createdAt) VALUES (?, ?, ?, ?, ?, ?)'
     ).run(actId, task.id, 'created', `Card created in ${COL_LABELS[task.column] || task.column}`, task.assignee, task.createdAt);
-
-    // Fan-out SSE event to connected clients for this project
-    sseBroadcast(task.projectId, 'task.created', { task });
 
     res.status(201).json(task);
   } catch (err) {
@@ -1338,102 +685,10 @@ app.put('/api/tasks/:id', (req, res) => {
     }
   }
 
-  // Fan-out SSE event to connected clients for this project
-  sseBroadcast(updated.projectId || 'default', 'task.updated', { task: updated });
-
   res.json(updated);
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Internal server error" });
-  }
-});
-
-// Reorder tasks within a column (or across columns)
-// Body: { taskId, newIndex, column }
-// Calculates a new sortOrder for the task by placing it between the cards at (newIndex-1) and newIndex
-app.post('/api/tasks/reorder', (req, res) => {
-  try {
-    const { taskId, newIndex, column } = req.body;
-    if (!taskId || newIndex == null || !column) {
-      return res.status(400).json({ error: 'taskId, newIndex, and column are required' });
-    }
-    const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(taskId);
-    if (!task) return res.status(404).json({ error: 'Not found' });
-
-    // Fetch all tasks in the target column (ordered by sortOrder, then createdAt as tiebreaker)
-    // Exclude the dragged task itself
-    const siblings = db.prepare(
-      `SELECT id, sortOrder FROM tasks WHERE "column" = ? AND projectId = ? AND id != ? ORDER BY sortOrder ASC NULLS LAST, createdAt ASC`
-    ).all(column, task.projectId || 'default', taskId);
-
-    // Clamp newIndex to valid range
-    const clampedIndex = Math.max(0, Math.min(newIndex, siblings.length));
-
-    let newSortOrder;
-    if (siblings.length === 0) {
-      newSortOrder = 1000;
-    } else if (clampedIndex === 0) {
-      // Insert before the first card
-      const firstOrder = siblings[0].sortOrder != null ? siblings[0].sortOrder : 1000;
-      newSortOrder = firstOrder - 1000;
-    } else if (clampedIndex >= siblings.length) {
-      // Insert after the last card
-      const lastOrder = siblings[siblings.length - 1].sortOrder != null ? siblings[siblings.length - 1].sortOrder : 1000;
-      newSortOrder = lastOrder + 1000;
-    } else {
-      // Insert between two cards
-      const prev = siblings[clampedIndex - 1].sortOrder != null ? siblings[clampedIndex - 1].sortOrder : 0;
-      const next = siblings[clampedIndex].sortOrder != null ? siblings[clampedIndex].sortOrder : prev + 2000;
-      newSortOrder = (prev + next) / 2;
-
-      // Renormalize if the gap gets too small (< 0.001)
-      if (Math.abs(next - prev) < 0.001) {
-        // Renormalize all tasks in this column with spacing of 1000
-        const allInCol = db.prepare(
-          `SELECT id FROM tasks WHERE "column" = ? AND projectId = ? ORDER BY sortOrder ASC NULLS LAST, createdAt ASC`
-        ).all(column, task.projectId || 'default');
-        const renorm = db.transaction(() => {
-          allInCol.forEach((t, i) => {
-            db.prepare('UPDATE tasks SET sortOrder = ? WHERE id = ?').run((i + 1) * 1000, t.id);
-          });
-        });
-        renorm();
-        // After renormalization, recompute newSortOrder
-        const renormedSiblings = db.prepare(
-          `SELECT id, sortOrder FROM tasks WHERE "column" = ? AND projectId = ? AND id != ? ORDER BY sortOrder ASC`
-        ).all(column, task.projectId || 'default', taskId);
-        const ci = Math.min(clampedIndex, renormedSiblings.length);
-        if (ci === 0) {
-          newSortOrder = (renormedSiblings[0]?.sortOrder ?? 1000) - 1000;
-        } else if (ci >= renormedSiblings.length) {
-          newSortOrder = (renormedSiblings[renormedSiblings.length - 1]?.sortOrder ?? 0) + 1000;
-        } else {
-          newSortOrder = ((renormedSiblings[ci - 1].sortOrder ?? 0) + (renormedSiblings[ci].sortOrder ?? 0)) / 2;
-        }
-      }
-    }
-
-    // Update the task's column and sortOrder
-    db.prepare('UPDATE tasks SET "column" = ?, sortOrder = ? WHERE id = ?').run(column, newSortOrder, taskId);
-
-    // If column changed, log it
-    if (column !== task.column) {
-      const now = new Date().toISOString();
-      const actId = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
-      db.prepare(
-        'INSERT INTO card_activity (id, taskId, type, content, author, createdAt) VALUES (?, ?, ?, ?, ?, ?)'
-      ).run(actId, taskId, 'move', `Moved from ${COL_LABELS[task.column] || task.column} → ${COL_LABELS[column] || column}`, 'System', now);
-      db.prepare(
-        'INSERT INTO notifications (task_id, task_title, from_col, to_col, changed_by, created_at) VALUES (?, ?, ?, ?, ?, ?)'
-      ).run(taskId, task.title, task.column, column, task.assignee || 'System', now);
-    }
-
-    const updated = db.prepare('SELECT * FROM tasks WHERE id = ?').get(taskId);
-    sseBroadcast(task.projectId || 'default', 'task.updated', { task: updated });
-    res.json({ ...updated, tags: JSON.parse(updated.tags), sortOrder: newSortOrder });
-  } catch (err) {
-    console.error('POST /api/tasks/reorder error:', err);
-    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -1445,18 +700,13 @@ app.get('/api/tasks/:id', (req, res) => {
     // Get blockers and compute blocked status (single query instead of N+1)
     const blockerRows = db.prepare('SELECT id, "column" FROM tasks WHERE id IN (SELECT blocker_id FROM task_dependencies WHERE blocked_id = ?)').all(task.id);
     const activeBlockers = blockerRows.filter(b => b.column !== 'done');
-    // Populate handoffLog from dedicated table (new) or fall back to JSON blob (legacy)
-    const handoffRows = db.prepare('SELECT * FROM handoff_log WHERE taskId = ? ORDER BY timestamp ASC').all(task.id);
-    const handoffLog = handoffRows.length > 0
-      ? handoffRows
-      : (task.handoffLog ? JSON.parse(task.handoffLog) : []);
     res.json({
       ...task,
       tags: JSON.parse(task.tags),
       subtasks: task.subtasks ? JSON.parse(task.subtasks) : null,
       blockedBy: task.blockedBy ? JSON.parse(task.blockedBy) : [],
       blocked: activeBlockers.length > 0,
-      handoffLog,
+      handoffLog: task.handoffLog ? JSON.parse(task.handoffLog) : [],
       agentStatus: (() => {
         if (task.column === 'done') return 'done';
         if (!task.lockedBy) return 'idle';
@@ -1482,15 +732,6 @@ app.post('/api/tasks/:id/spawn', async (req, res) => {
     const now = new Date();
     if (task.lockedBy && task.lockExpiresAt && new Date(task.lockExpiresAt) > now) {
       return res.status(409).json({ error: 'Task already claimed', lockedBy: task.lockedBy });
-    }
-
-    // Check if task has unresolved blockers
-    const activeBlockers = db.prepare(
-      "SELECT td.blocker_id FROM task_dependencies td INNER JOIN tasks t ON t.id = td.blocker_id WHERE td.blocked_id = ? AND t.column != 'done'"
-    ).all(req.params.id);
-    if (activeBlockers.length > 0) {
-      const activeBlockerIds = activeBlockers.map(r => r.blocker_id);
-      return res.status(409).json({ error: 'Task is blocked', blockedBy: activeBlockerIds });
     }
 
     // Read project agentConfig for model/timeout overrides
@@ -1566,42 +807,25 @@ app.post('/api/tasks/:id/spawn', async (req, res) => {
   }
 });
 
-// POST /api/tasks/:id/handoff — append a handoff note (writes to dedicated table)
+// POST /api/tasks/:id/handoff — append handoff note
 app.post('/api/tasks/:id/handoff', (req, res) => {
   try {
-    const task = db.prepare('SELECT id FROM tasks WHERE id = ?').get(req.params.id);
+    const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id);
     if (!task) return res.status(404).json({ error: 'Not found' });
 
-    const message = (req.body.message || req.body.note || '').trim();
-    if (!message) return res.status(400).json({ error: 'message required' });
-
-    const crypto = require('crypto');
     const entry = {
-      id: crypto.randomBytes(8).toString('hex'),
-      taskId: req.params.id,
-      agentId: req.body.agentId || req.body.agentSessionId || 'unknown',
-      message,
+      agentId: req.body.agentId || 'unknown',
       timestamp: new Date().toISOString(),
+      message: (req.body.message || '').trim(),
     };
+    if (!entry.message) return res.status(400).json({ error: 'message required' });
 
-    db.prepare('INSERT INTO handoff_log (id, taskId, agentId, message, timestamp) VALUES (?, ?, ?, ?, ?)')
-      .run(entry.id, entry.taskId, entry.agentId, entry.message, entry.timestamp);
+    const log = task.handoffLog ? JSON.parse(task.handoffLog) : [];
+    log.push(entry);
+
+    db.prepare('UPDATE tasks SET handoffLog = ? WHERE id = ?').run(JSON.stringify(log), task.id);
 
     res.status(201).json(entry);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Internal server error" });
-  }
-});
-
-// GET /api/tasks/:id/handoff — list all handoff notes for a task
-app.get('/api/tasks/:id/handoff', (req, res) => {
-  try {
-    const task = db.prepare('SELECT id FROM tasks WHERE id = ?').get(req.params.id);
-    if (!task) return res.status(404).json({ error: 'Not found' });
-
-    const rows = db.prepare('SELECT * FROM handoff_log WHERE taskId = ? ORDER BY timestamp ASC').all(req.params.id);
-    res.json(rows);
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Internal server error" });
@@ -1613,7 +837,7 @@ app.get('/api/tasks/:id/handoff', (req, res) => {
 // POST /api/tasks/:id/logs — append a log entry (called by agents)
 app.post('/api/tasks/:id/logs', (req, res) => {
   try {
-    const task = db.prepare('SELECT id, projectId FROM tasks WHERE id = ?').get(req.params.id);
+    const task = db.prepare('SELECT id FROM tasks WHERE id = ?').get(req.params.id);
     if (!task) return res.status(404).json({ error: 'Not found' });
 
     const entry = {
@@ -1629,12 +853,7 @@ app.post('/api/tasks/:id/logs', (req, res) => {
       'INSERT INTO agent_logs (taskId, agentSessionId, level, message, timestamp) VALUES (?, ?, ?, ?, ?)'
     ).run(entry.taskId, entry.agentSessionId, entry.level, entry.message, entry.timestamp);
 
-    const logEntry = { id: result.lastInsertRowid, ...entry };
-
-    // Fan-out SSE log.created event to connected clients for this project
-    sseBroadcast(task.projectId || 'default', 'log.created', { log: logEntry });
-
-    res.status(201).json(logEntry);
+    res.status(201).json({ id: result.lastInsertRowid, ...entry });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Internal server error" });
@@ -1672,124 +891,10 @@ app.get('/api/tasks/:id/logs', (req, res) => {
   }
 });
 
-// POST /api/tasks/bulk — perform a bulk action on multiple tasks
-// Body: { ids: string[], action: 'move' | 'delete', data?: { column?: string } }
-// Returns: { affected: number, results: [...] }
-app.post('/api/tasks/bulk', (req, res) => {
-  try {
-    const { ids, action, data } = req.body;
-
-    if (!Array.isArray(ids) || ids.length === 0) {
-      return res.status(400).json({ error: 'ids must be a non-empty array' });
-    }
-    if (ids.length > 200) {
-      return res.status(400).json({ error: 'Cannot bulk-operate on more than 200 tasks at once' });
-    }
-    if (!['move', 'delete'].includes(action)) {
-      return res.status(400).json({ error: 'action must be one of: move, delete' });
-    }
-
-    if (action === 'move') {
-      const newCol = data && data.column;
-      if (!newCol || !VALID_COLUMNS.includes(newCol)) {
-        return res.status(400).json({ error: `data.column must be one of: ${VALID_COLUMNS.join(', ')}` });
-      }
-
-      const now = new Date().toISOString();
-      const results = [];
-
-      const bulkMove = db.transaction(() => {
-        for (const id of ids) {
-          const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id);
-          if (!task) { results.push({ id, ok: false, error: 'Not found' }); continue; }
-          if (task.column === newCol) { results.push({ id, ok: true, skipped: true }); continue; }
-
-          db.prepare('UPDATE tasks SET "column" = ? WHERE id = ?').run(newCol, id);
-
-          // Activity log
-          const actId = Date.now().toString(36) + Math.random().toString(36).slice(2, 9);
-          db.prepare(
-            'INSERT INTO card_activity (id, taskId, type, content, author, createdAt) VALUES (?, ?, ?, ?, ?, ?)'
-          ).run(actId, id, 'move', `Moved from ${COL_LABELS[task.column] || task.column} → ${COL_LABELS[newCol] || newCol} (bulk)`, 'System', now);
-
-          db.prepare(
-            'INSERT INTO notifications (task_id, task_title, from_col, to_col, changed_by, created_at) VALUES (?, ?, ?, ?, ?, ?)'
-          ).run(id, task.title, task.column, newCol, 'System', now);
-
-          results.push({ id, ok: true });
-        }
-      });
-      bulkMove();
-
-      // SSE broadcast per task
-      const projectId = (ids.length > 0 && db.prepare('SELECT projectId FROM tasks WHERE id = ?').get(ids[0]))?.projectId || 'default';
-      sseBroadcast(projectId, 'task.updated', { bulkMove: true, ids, column: newCol });
-
-      return res.json({ affected: results.filter(r => r.ok && !r.skipped).length, results });
-    }
-
-    if (action === 'delete') {
-      const results = [];
-
-      // Collect unique projectIds before deletion
-      const placeholders = ids.map(() => '?').join(',');
-      const tasksToDelete = db.prepare(`SELECT DISTINCT projectId FROM tasks WHERE id IN (${placeholders})`).all(...ids);
-      const projectIds = new Set(tasksToDelete.map(t => t.projectId || 'default'));
-
-      const bulkDelete = db.transaction(() => {
-        for (const id of ids) {
-          const task = db.prepare('SELECT id, projectId FROM tasks WHERE id = ?').get(id);
-          if (!task) { results.push({ id, ok: false, error: 'Not found' }); continue; }
-
-          db.prepare('DELETE FROM agent_logs WHERE taskId = ?').run(id);
-          db.prepare('DELETE FROM handoff_log WHERE taskId = ?').run(id);
-          db.prepare('DELETE FROM card_activity WHERE taskId = ?').run(id);
-          db.prepare('DELETE FROM notifications WHERE task_id = ?').run(id);
-          db.prepare('DELETE FROM task_dependencies WHERE blocker_id = ? OR blocked_id = ?').run(id, id);
-          db.prepare('DELETE FROM attachments WHERE task_id = ?').run(id);
-          db.prepare('DELETE FROM tasks WHERE id = ?').run(id);
-
-          results.push({ id, ok: true });
-        }
-      });
-      bulkDelete();
-
-      // SSE broadcast per unique projectId
-      for (const pid of projectIds) {
-        sseBroadcast(pid, 'task.deleted', { bulkDelete: true, ids });
-      }
-
-      return res.json({ affected: results.filter(r => r.ok).length, results });
-    }
-  } catch (err) {
-    console.error('POST /api/tasks/bulk error:', err);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
 // Delete task
 app.delete('/api/tasks/:id', (req, res) => {
   try {
-    // Capture projectId before deletion for SSE fan-out
-    const taskRow = db.prepare('SELECT id, projectId FROM tasks WHERE id = ?').get(req.params.id);
-    const deletedProjectId = taskRow ? (taskRow.projectId || 'default') : 'default';
-
-    const deleteTask = db.transaction(() => {
-      const taskId = req.params.id;
-      // Cascade cleanup of all child tables (foreign_keys pragma not enabled, so manual)
-      db.prepare('DELETE FROM agent_logs WHERE taskId = ?').run(taskId);
-      db.prepare('DELETE FROM handoff_log WHERE taskId = ?').run(taskId);
-      db.prepare('DELETE FROM card_activity WHERE taskId = ?').run(taskId);
-      db.prepare('DELETE FROM notifications WHERE task_id = ?').run(taskId);
-      db.prepare('DELETE FROM task_dependencies WHERE blocker_id = ? OR blocked_id = ?').run(taskId, taskId);
-      db.prepare('DELETE FROM attachments WHERE task_id = ?').run(taskId);
-      db.prepare('DELETE FROM tasks WHERE id = ?').run(taskId);
-    });
-    deleteTask();
-
-    // Fan-out SSE event to connected clients for this project
-    sseBroadcast(deletedProjectId, 'task.deleted', { taskId: req.params.id });
-
+    db.prepare('DELETE FROM tasks WHERE id = ?').run(req.params.id);
     res.status(204).end();
   } catch (err) {
     console.error('DELETE /api/tasks/:id error:', err);
@@ -1874,17 +979,6 @@ app.post('/api/notifications/read', (req, res) => {
   }
 });
 
-// Mark a single notification as read
-app.post('/api/notifications/:id/read', (req, res) => {
-  try {
-    db.prepare('UPDATE notifications SET is_read = 1 WHERE id = ?').run(req.params.id);
-    res.json({ ok: true });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Internal server error" });
-  }
-});
-
 // Dismiss / delete a notification
 app.delete('/api/notifications/:id', (req, res) => {
   try {
@@ -1904,23 +998,7 @@ app.get('/api/dependencies', (req, res) => {
   try {
     const limit = Math.min(parseInt(req.query.limit, 10) || 100, 500);
     const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
-    const projectId = req.query.projectId || null;
-
-    let query, params;
-    if (projectId) {
-      // Filter to dependencies where either blocker or blocked task belongs to the project
-      query = `SELECT d.blocker_id, d.blocked_id FROM task_dependencies d
-               INNER JOIN tasks t ON (t.id = d.blocker_id OR t.id = d.blocked_id)
-               WHERE t.projectId = ?
-               GROUP BY d.blocker_id, d.blocked_id
-               LIMIT ? OFFSET ?`;
-      params = [projectId, limit, offset];
-    } else {
-      query = 'SELECT blocker_id, blocked_id FROM task_dependencies LIMIT ? OFFSET ?';
-      params = [limit, offset];
-    }
-
-    const rows = db.prepare(query).all(...params);
+    const rows = db.prepare('SELECT blocker_id, blocked_id FROM task_dependencies LIMIT ? OFFSET ?').all(limit, offset);
     res.json(rows);
   } catch (err) {
     console.error(err);
@@ -2242,111 +1320,11 @@ app.get('/api/stats', (req, res) => {
       avgTimeToComplete = Math.round(totalSec / completionRows.length);
     }
 
-    // Agent activity metrics
-    const nowIso = new Date().toISOString();
-    const agentActive = db.prepare(
-      `SELECT COUNT(*) as cnt FROM tasks WHERE projectId = ? AND lockedBy IS NOT NULL AND lockExpiresAt >= ?`
-    ).get(projectId, nowIso).cnt;
-
-    const agentExpiredLocks = db.prepare(
-      `SELECT COUNT(*) as cnt FROM tasks WHERE projectId = ? AND lockedBy IS NOT NULL AND lockExpiresAt < ?`
-    ).get(projectId, nowIso).cnt;
-
-    // blockedCount: tasks where at least one blockedBy dep is not done, and task itself is not done
-    const allNonDone = db.prepare(
-      `SELECT id, blockedBy FROM tasks WHERE projectId = ? AND "column" != 'done'`
-    ).all(projectId);
-    const doneIdSet = new Set(
-      db.prepare(`SELECT id FROM tasks WHERE projectId = ? AND "column" = 'done'`).all(projectId).map(r => r.id)
-    );
-    let blockedCount = 0;
-    for (const t of allNonDone) {
-      const deps = t.blockedBy ? JSON.parse(t.blockedBy) : [];
-      if (deps.some(id => !doneIdSet.has(id))) blockedCount++;
-    }
-
-    // waveProgress: per-wave breakdown
-    const waveRows = db.prepare(
-      `SELECT wave, "column", COUNT(*) as cnt FROM tasks WHERE projectId = ? GROUP BY wave, "column"`
-    ).all(projectId);
-    const waveMap = new Map();
-    for (const row of waveRows) {
-      const key = row.wave === null || row.wave === undefined ? null : row.wave;
-      if (!waveMap.has(key)) waveMap.set(key, { wave: key, total: 0, done: 0 });
-      const entry = waveMap.get(key);
-      entry.total += row.cnt;
-      if (row.column === 'done') entry.done += row.cnt;
-    }
-    const waveProgress = Array.from(waveMap.values())
-      .filter(w => w.wave !== null)
-      .sort((a, b) => a.wave - b.wave)
-      .map(w => ({ wave: w.wave, total: w.total, done: w.done, pct: w.total > 0 ? Math.round((w.done / w.total) * 100) : 0 }));
-
-    // completedByAgent: tasks completed this week, grouped by agentSessionId
-    const completedByAgentRows = db.prepare(
-      `SELECT t.agentSessionId, COUNT(DISTINCT a.taskId) as cnt
-       FROM card_activity a
-       INNER JOIN tasks t ON t.id = a.taskId
-       WHERE a.type = 'move' AND a.content LIKE '%→ Done%' AND a.createdAt >= ? AND t.projectId = ? AND t.agentSessionId IS NOT NULL
-       GROUP BY t.agentSessionId`
-    ).all(weekAgo, projectId);
-    const completedByAgent = completedByAgentRows.map(r => ({ agentSessionId: r.agentSessionId, count: r.cnt }));
-
-    res.json({
-      projectId, projectName, totalByAssignee, completedThisWeek, overdueCount, columnCounts,
-      avgTimeToComplete, agentActive, agentExpiredLocks, blockedCount, waveProgress, completedByAgent
-    });
+    res.json({ projectId, projectName, totalByAssignee, completedThisWeek, overdueCount, columnCounts, avgTimeToComplete });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Internal server error" });
   }
-});
-
-// ─── Server-Sent Events ───────────────────────────────────────────────────────
-// GET /api/events?projectId=X
-// Streams task.created, task.updated, task.deleted, and log.created events
-// to connected clients so the board can update in real-time without polling.
-app.get('/api/events', (req, res) => {
-  const projectId = req.query.projectId || 'default';
-
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
-  res.setHeader('X-Accel-Buffering', 'no'); // disable nginx proxy buffering
-  res.flushHeaders();
-
-  // Send a heartbeat comment every 25s to keep the connection alive through proxies
-  const heartbeat = setInterval(() => {
-    try { res.write(': heartbeat\n\n'); } catch(e) { /* ignore */ }
-  }, 25000);
-
-  sseSubscribe(projectId, res);
-
-  // Immediately send a 'connected' event so the client knows the stream is live
-  res.write(`event: connected\ndata: ${JSON.stringify({ projectId, ts: new Date().toISOString() })}\n\n`);
-
-  req.on('close', () => {
-    clearInterval(heartbeat);
-    sseUnsubscribe(projectId, res);
-  });
-});
-
-// ─── Health Check ─────────────────────────────────────────────────────────────
-app.get('/api/health', (req, res) => {
-  let dbStatus = 'ok';
-  try {
-    db.prepare('SELECT 1').get();
-  } catch (err) {
-    dbStatus = 'error';
-  }
-  const healthy = dbStatus === 'ok';
-  res.status(healthy ? 200 : 503).json({
-    status: healthy ? 'ok' : 'degraded',
-    uptime: process.uptime(),
-    db: dbStatus,
-    port: PORT,
-    timestamp: new Date().toISOString(),
-  });
 });
 
 // ─── Startup: seed default 'agent-task' template for projects that have none ──
@@ -2398,7 +1376,7 @@ Send a BlueBubbles message to +18183121807:
 // Run immediately at startup to clear any expired locks from a prior run,
 // then repeat every 60 seconds. Keeps GET /api/tasks read-only.
 const expireStaleLocksStmt = db.prepare(
-  "UPDATE tasks SET lockedBy=NULL,lockedAt=NULL,lockExpiresAt=NULL WHERE lockExpiresAt IS NOT NULL AND lockExpiresAt < datetime('now')"
+  "UPDATE tasks SET lockedBy=NULL,lockedAt=NULL,lockExpiresAt=NULL WHERE lockExpiresAt IS NOT NULL AND lockExpiresAt < datetime(\"now\")"
 );
 expireStaleLocksStmt.run(); // clear on startup
 setInterval(() => {
