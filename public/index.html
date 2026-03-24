@@ -118,6 +118,7 @@ header {
   padding: 24px 32px;
   min-height: calc(100vh - 81px);
   align-items: flex-start;
+  position: relative;
 }
 
 .column {
@@ -360,7 +361,13 @@ input[type="date"] {
   transition: opacity var(--transition);
 }
 
-.card:hover .card-actions { opacity: 1; }
+.card:hover .card-actions,
+.card:focus-within .card-actions { opacity: 1; }
+
+.card:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
 
 .card-action-btn {
   width: 24px; height: 24px;
@@ -1422,6 +1429,122 @@ input[type="date"] {
   display: none;
 }
 .no-results.visible { display: block; }
+
+/* ===== BOARD LOADING OVERLAY ===== */
+#boardLoadingOverlay {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: none;
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: 20px;
+  padding: 24px 32px;
+  pointer-events: none;
+}
+
+#boardLoadingOverlay.visible {
+  display: flex;
+  pointer-events: all;
+}
+
+.board-loading-col {
+  flex: 1;
+  min-width: 280px;
+  max-width: 340px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.skeleton-col-header {
+  height: 48px;
+  border-radius: 12px 12px 0 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-bottom: none;
+  animation: skeletonPulse 1.5s ease-in-out infinite;
+}
+
+.skeleton-card {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  animation: skeletonPulse 1.5s ease-in-out infinite;
+}
+
+.skeleton-line {
+  border-radius: 4px;
+  background: var(--border);
+}
+
+.skeleton-line.title { height: 14px; width: 75%; }
+.skeleton-line.desc  { height: 11px; width: 90%; }
+.skeleton-line.desc2 { height: 11px; width: 55%; }
+.skeleton-line.meta  { height: 10px; width: 40%; margin-top: 4px; }
+
+@keyframes skeletonPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+/* Board error state */
+#boardErrorState {
+  display: none;
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 12px;
+  padding: 32px;
+  text-align: center;
+  pointer-events: all;
+}
+
+#boardErrorState.visible {
+  display: flex;
+}
+
+.board-error-icon {
+  font-size: 40px;
+}
+
+.board-error-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--red);
+}
+
+.board-error-msg {
+  font-size: 13px;
+  color: var(--text-dim);
+  max-width: 360px;
+  line-height: 1.5;
+}
+
+.board-error-retry {
+  margin-top: 6px;
+  padding: 9px 20px;
+  border-radius: 8px;
+  border: 1px solid var(--red);
+  background: rgba(225, 112, 85, 0.12);
+  color: var(--red);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.board-error-retry:hover {
+  background: rgba(225, 112, 85, 0.25);
+}
 
 /* Search bar mobile overrides */
 @media (max-width: 768px) {
@@ -2862,12 +2985,12 @@ function cardHTML(t, q) {
     </div>`;
   }
 
-  return `<div class="card${isOverdue ? ' overdue-card' : ''}${blocked ? ' is-blocked' : ''}${t.column === 'idea' ? ' idea-card' : ''}" draggable="true" data-id="${t.id}">
+  return `<div class="card${isOverdue ? ' overdue-card' : ''}${blocked ? ' is-blocked' : ''}${t.column === 'idea' ? ' idea-card' : ''}" draggable="true" data-id="${t.id}" tabindex="0">
     <div class="card-priority ${t.priority}"></div>
     <div class="card-actions">
-      ${(t.column === 'backlog' && !t.lockedBy && !isBlocked(t.id)) ? `<button class="card-action-btn" onclick="spawnAgent('${t.id}', event)" title="▶ Run agent" style="background:rgba(0,184,148,0.15);color:var(--green);">▶</button>` : ''}
-      <button class="card-action-btn" onclick="editTask('${t.id}')" title="Edit">&#9998;</button>
-      <button class="card-action-btn delete" onclick="deleteTask('${t.id}')" title="Delete">&times;</button>
+      ${(t.column === 'backlog' && !t.lockedBy && !isBlocked(t.id)) ? `<button class="card-action-btn" onclick="spawnAgent('${t.id}', event)" title="Run agent" aria-label="Run agent for ${esc(t.title)}">▶</button>` : ''}
+      <button class="card-action-btn" onclick="editTask('${t.id}')" title="Edit card" aria-label="Edit ${esc(t.title)}">&#9998;</button>
+      <button class="card-action-btn delete" onclick="deleteTask('${t.id}')" title="Delete card" aria-label="Delete ${esc(t.title)}">&times;</button>
     </div>
     <div class="card-title">${q ? highlightText(t.title, q) : esc(t.title)}</div>
     ${t.description ? `<div class="card-desc">${q ? highlightText(t.description, q) : esc(t.description)}</div>` : ''}
@@ -3097,6 +3220,58 @@ function applyTemplate() {
 let activityOpen = false;
 let currentTaskActivity = [];
 
+// ─── Focus Trap ──────────────────────────────────────────────────────────────
+const FOCUSABLE_SELECTORS = [
+  'a[href]',
+  'button:not([disabled])',
+  'input:not([disabled])',
+  'select:not([disabled])',
+  'textarea:not([disabled])',
+  '[tabindex]:not([tabindex="-1"])',
+].join(', ');
+
+let _focusTrapHandler = null;
+let _focusTrapTrigger = null;
+
+function trapFocus(container) {
+  // Remember what triggered the modal so we can restore focus on close
+  _focusTrapTrigger = document.activeElement;
+
+  const getFocusable = () => Array.from(container.querySelectorAll(FOCUSABLE_SELECTORS))
+    .filter(el => !el.closest('[style*="display: none"]') && !el.closest('[hidden]'));
+
+  // Move focus to the first focusable element
+  const focusable = getFocusable();
+  if (focusable.length) focusable[0].focus();
+
+  // Build and attach the keydown handler
+  _focusTrapHandler = function(e) {
+    if (e.key !== 'Tab') return;
+    const els = getFocusable();
+    if (!els.length) { e.preventDefault(); return; }
+    const first = els[0];
+    const last = els[els.length - 1];
+    if (e.shiftKey) {
+      if (document.activeElement === first) { e.preventDefault(); last.focus(); }
+    } else {
+      if (document.activeElement === last) { e.preventDefault(); first.focus(); }
+    }
+  };
+  container.addEventListener('keydown', _focusTrapHandler);
+}
+
+function releaseFocus(container) {
+  if (_focusTrapHandler) {
+    container.removeEventListener('keydown', _focusTrapHandler);
+    _focusTrapHandler = null;
+  }
+  if (_focusTrapTrigger && typeof _focusTrapTrigger.focus === 'function') {
+    _focusTrapTrigger.focus();
+    _focusTrapTrigger = null;
+  }
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 function openModal(task) {
   document.getElementById('modal').classList.add('open');
   // Lock body scroll to prevent background board from scrolling
@@ -3194,7 +3369,11 @@ function openModal(task) {
     stopAgentLogRefresh();
   }
 
-  setTimeout(() => document.getElementById('fTitle').focus(), 100);
+  // Activate focus trap — defer slightly so DOM sections finish showing/hiding
+  setTimeout(() => {
+    const modalEl = document.querySelector('#modal .modal');
+    if (modalEl) trapFocus(modalEl);
+  }, 50);
 }
 
 function renderBlockerList(taskId) {
@@ -3465,6 +3644,9 @@ async function deleteComment(id) {
 
 function closeModal() {
   stopAgentLogRefresh();
+  // Release focus trap and restore focus to the triggering element
+  const modalEl = document.querySelector('#modal .modal');
+  if (modalEl) releaseFocus(modalEl);
   document.getElementById('modal').classList.remove('open');
   // Restore body scroll
   document.body.style.overflow = '';
@@ -3883,6 +4065,23 @@ function closeStats() {
 // Close stats on Escape
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') { closeModal(); closeStats(); }
+});
+
+// Keyboard accessibility for card elements
+document.addEventListener('keydown', e => {
+  const card = e.target.closest('.card');
+  if (!card) return;
+  // Don't intercept if focus is inside an input/button within the card
+  if (e.target !== card) return;
+  const id = card.dataset.id;
+  if (!id) return;
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    editTask(id);
+  } else if (e.key === 'Delete' || e.key === 'Backspace') {
+    e.preventDefault();
+    deleteTask(id);
+  }
 });
 
 // ─── Project Sidebar ──────────────────────────────────────────────────────────

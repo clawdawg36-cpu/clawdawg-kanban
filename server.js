@@ -89,6 +89,33 @@ app.use('/api', (req, res, next) => {
   next();
 });
 
+// ─── SSE client registry ──────────────────────────────────────────────────────
+// Maps projectId → Set of response objects for connected SSE clients.
+const sseClients = new Map();
+
+function sseSubscribe(projectId, res) {
+  if (!sseClients.has(projectId)) sseClients.set(projectId, new Set());
+  sseClients.get(projectId).add(res);
+}
+
+function sseUnsubscribe(projectId, res) {
+  const set = sseClients.get(projectId);
+  if (set) {
+    set.delete(res);
+    if (set.size === 0) sseClients.delete(projectId);
+  }
+}
+
+// Fan-out an SSE event to all connected clients for a given projectId.
+function sseBroadcast(projectId, eventType, data) {
+  const set = sseClients.get(projectId);
+  if (!set || set.size === 0) return;
+  const payload = `event: ${eventType}\ndata: ${JSON.stringify(data)}\n\n`;
+  for (const res of set) {
+    try { res.write(payload); } catch(e) { /* client already gone */ }
+  }
+}
+
 // ─── Webhook event emitter ────────────────────────────────────────────────────
 const https = require('https');
 const http = require('http');
@@ -362,6 +389,7 @@ app.delete('/api/projects/:id', (req, res) => {
         const placeholders = taskIds.map(() => '?').join(', ');
         // Cascade cleanup of child tables referencing task IDs
         db.prepare(`DELETE FROM agent_logs WHERE taskId IN (${placeholders})`).run(...taskIds);
+        db.prepare(`DELETE FROM handoff_log WHERE taskId IN (${placeholders})`).run(...taskIds);
         db.prepare(`DELETE FROM card_activity WHERE taskId IN (${placeholders})`).run(...taskIds);
         db.prepare(`DELETE FROM notifications WHERE task_id IN (${placeholders})`).run(...taskIds);
         db.prepare(`DELETE FROM task_dependencies WHERE blocker_id IN (${placeholders}) OR blocked_id IN (${placeholders})`).run(...taskIds, ...taskIds);
@@ -429,6 +457,216 @@ app.get('/api/projects/:id/waves', (req, res) => {
     res.json(result);
   } catch (err) {
     console.error('GET /api/projects/:id/waves error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ─── Export / Import ─────────────────────────────────────────────────────────
+
+// GET /api/projects/:id/export?format=json|csv|ics
+// Exports all tasks for the project in the requested format.
+//   json  — full project snapshot (project metadata + tasks array)
+//   csv   — flat CSV with all task fields, one row per task
+//   ics   — iCalendar VTODO output for tasks that have a dueDate
+app.get('/api/projects/:id/export', (req, res) => {
+  try {
+    const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id);
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+
+    const tasks = db.prepare('SELECT * FROM tasks WHERE projectId = ?').all(req.params.id);
+
+    const format = (req.query.format || 'json').toLowerCase();
+
+    if (format === 'json') {
+      const snapshot = {
+        exportedAt: new Date().toISOString(),
+        project: { ...project, agentConfig: project.agentConfig ? JSON.parse(project.agentConfig) : null },
+        tasks: tasks.map(t => ({
+          ...t,
+          tags: JSON.parse(t.tags || '[]'),
+          subtasks: t.subtasks ? JSON.parse(t.subtasks) : null,
+          blockedBy: t.blockedBy ? JSON.parse(t.blockedBy) : [],
+          handoffLog: t.handoffLog ? JSON.parse(t.handoffLog) : [],
+        })),
+      };
+      res.setHeader('Content-Disposition', `attachment; filename="project-${req.params.id}-export.json"`);
+      res.setHeader('Content-Type', 'application/json');
+      return res.json(snapshot);
+    }
+
+    if (format === 'csv') {
+      const CSV_FIELDS = ['id', 'title', 'description', 'assignee', 'priority', 'tags', 'column', 'createdAt', 'dueDate', 'recurring', 'subtasks', 'projectId', 'wave', 'blockedBy'];
+      const escapeCsv = (val) => {
+        if (val === null || val === undefined) return '';
+        const str = String(val).replace(/"/g, '""');
+        return /[,"\n\r]/.test(str) ? `"${str}"` : str;
+      };
+      const header = CSV_FIELDS.join(',');
+      const rows = tasks.map(t => {
+        return CSV_FIELDS.map(f => {
+          if (f === 'tags') return escapeCsv(JSON.parse(t.tags || '[]').join(';'));
+          if (f === 'blockedBy') return escapeCsv((t.blockedBy ? JSON.parse(t.blockedBy) : []).join(';'));
+          if (f === 'subtasks') return escapeCsv(t.subtasks ? JSON.stringify(JSON.parse(t.subtasks)) : '');
+          return escapeCsv(t[f]);
+        }).join(',');
+      });
+      const csv = [header, ...rows].join('\n');
+      res.setHeader('Content-Disposition', `attachment; filename="project-${req.params.id}-export.csv"`);
+      res.setHeader('Content-Type', 'text/csv');
+      return res.send(csv);
+    }
+
+    if (format === 'ics') {
+      // Only export tasks that have a dueDate
+      const dueTasks = tasks.filter(t => t.dueDate);
+
+      const escapeIcs = (str) => (str || '').replace(/\n/g, '\\n').replace(/,/g, '\\,').replace(/;/g, '\\;');
+
+      const foldLine = (line) => {
+        // RFC 5545: lines longer than 75 octets must be folded
+        const out = [];
+        while (line.length > 75) {
+          out.push(line.slice(0, 75));
+          line = ' ' + line.slice(75);
+        }
+        out.push(line);
+        return out.join('\r\n');
+      };
+
+      const uid = () => `${Date.now()}-${Math.random().toString(36).slice(2)}@kanban`;
+
+      const lines = [
+        'BEGIN:VCALENDAR',
+        'VERSION:2.0',
+        'PRODID:-//Kanban Board//Export//EN',
+        'CALSCALE:GREGORIAN',
+        'METHOD:PUBLISH',
+      ];
+
+      for (const t of dueTasks) {
+        const dueDate = t.dueDate.replace(/-/g, '');  // YYYYMMDD
+        const createdAt = new Date(t.createdAt).toISOString().replace(/[-:]/g, '').replace('.000', '');
+        const priority = { urgent: 1, high: 3, medium: 5, low: 9 }[t.priority] || 5;
+        const status = t.column === 'done' ? 'COMPLETED' : 'NEEDS-ACTION';
+        lines.push('BEGIN:VTODO');
+        lines.push(`UID:${uid()}`);
+        lines.push(`DTSTAMP:${createdAt.slice(0, 15)}Z`);
+        lines.push(`CREATED:${createdAt.slice(0, 15)}Z`);
+        lines.push(foldLine(`SUMMARY:${escapeIcs(t.title)}`));
+        if (t.description) lines.push(foldLine(`DESCRIPTION:${escapeIcs(t.description.slice(0, 500))}`));
+        lines.push(`DUE;VALUE=DATE:${dueDate}`);
+        lines.push(`PRIORITY:${priority}`);
+        lines.push(`STATUS:${status}`);
+        lines.push(`CATEGORIES:${escapeIcs((JSON.parse(t.tags || '[]')).join(',') || 'kanban')}`);
+        lines.push('END:VTODO');
+      }
+      lines.push('END:VCALENDAR');
+
+      const ics = lines.join('\r\n');
+      res.setHeader('Content-Disposition', `attachment; filename="project-${req.params.id}-export.ics"`);
+      res.setHeader('Content-Type', 'text/calendar; charset=utf-8');
+      return res.send(ics);
+    }
+
+    return res.status(400).json({ error: 'Invalid format. Use: json, csv, or ics' });
+  } catch (err) {
+    console.error('GET /api/projects/:id/export error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// POST /api/projects/:id/import
+// Body: { tasks: [...] }  — array of task objects (fields same as task schema)
+// Creates tasks in bulk; generates new IDs (does not overwrite existing tasks).
+// Returns: { imported: <count>, skipped: <count>, tasks: [...created task ids] }
+app.post('/api/projects/:id/import', (req, res) => {
+  try {
+    const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id);
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+
+    const incoming = req.body;
+    if (!incoming || typeof incoming !== 'object') {
+      return res.status(400).json({ error: 'Request body must be a JSON object' });
+    }
+
+    // Accept { tasks: [...] } or a bare array or a JSON snapshot from our own exporter
+    let taskList = null;
+    if (Array.isArray(incoming)) {
+      taskList = incoming;
+    } else if (Array.isArray(incoming.tasks)) {
+      taskList = incoming.tasks;
+    } else {
+      return res.status(400).json({ error: 'Body must be { tasks: [...] } or a task array' });
+    }
+
+    if (taskList.length === 0) {
+      return res.status(400).json({ error: 'tasks array is empty' });
+    }
+    if (taskList.length > 500) {
+      return res.status(400).json({ error: 'Cannot import more than 500 tasks at once' });
+    }
+
+    const IMPORT_ALLOWED_COLUMNS = new Set(['idea', 'backlog', 'in-progress', 'in-review', 'done']);
+    const IMPORT_ALLOWED_PRIORITIES = new Set(['urgent', 'high', 'medium', 'low']);
+
+    const importTasks = db.transaction(() => {
+      const imported = [];
+      let skipped = 0;
+      const now = new Date().toISOString();
+
+      for (const raw of taskList) {
+        if (!raw || typeof raw !== 'object') { skipped++; continue; }
+        const title = (raw.title || '').trim();
+        if (!title) { skipped++; continue; }
+
+        const col = IMPORT_ALLOWED_COLUMNS.has(raw.column) ? raw.column : 'backlog';
+        const pri = IMPORT_ALLOWED_PRIORITIES.has(raw.priority) ? raw.priority : 'medium';
+        const tags = Array.isArray(raw.tags) ? raw.tags : (typeof raw.tags === 'string' ? raw.tags.split(';').map(t => t.trim()).filter(Boolean) : []);
+        const blockedBy = Array.isArray(raw.blockedBy) ? raw.blockedBy : [];
+        const wave = Number.isInteger(raw.wave) && raw.wave >= 0 ? raw.wave : null;
+        const dueDate = raw.dueDate ? String(raw.dueDate).slice(0, 10) : null;
+        const subtasks = raw.subtasks ? JSON.stringify(raw.subtasks) : null;
+
+        const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+        db.prepare(
+          'INSERT INTO tasks (id, title, description, assignee, priority, tags, "column", createdAt, dueDate, recurring, subtasks, projectId, wave, blockedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        ).run(
+          id,
+          title,
+          raw.description || '',
+          raw.assignee || 'Mike',
+          pri,
+          JSON.stringify(tags),
+          col,
+          now,
+          dueDate,
+          raw.recurring || null,
+          subtasks,
+          req.params.id,
+          wave,
+          JSON.stringify(blockedBy)
+        );
+
+        // Log import activity
+        const actId = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+        db.prepare(
+          'INSERT INTO card_activity (id, taskId, type, content, author, createdAt) VALUES (?, ?, ?, ?, ?, ?)'
+        ).run(actId, id, 'created', `Card imported into ${COL_LABELS[col] || col}`, raw.assignee || 'Mike', now);
+
+        imported.push(id);
+      }
+
+      return { imported, skipped };
+    });
+
+    const result = importTasks();
+    res.status(201).json({
+      imported: result.imported.length,
+      skipped: result.skipped,
+      taskIds: result.imported,
+    });
+  } catch (err) {
+    console.error('POST /api/projects/:id/import error:', err);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -1285,6 +1523,7 @@ app.delete('/api/tasks/:id', (req, res) => {
       const taskId = req.params.id;
       // Cascade cleanup of all child tables (foreign_keys pragma not enabled, so manual)
       db.prepare('DELETE FROM agent_logs WHERE taskId = ?').run(taskId);
+      db.prepare('DELETE FROM handoff_log WHERE taskId = ?').run(taskId);
       db.prepare('DELETE FROM card_activity WHERE taskId = ?').run(taskId);
       db.prepare('DELETE FROM notifications WHERE task_id = ?').run(taskId);
       db.prepare('DELETE FROM task_dependencies WHERE blocker_id = ? OR blocked_id = ?').run(taskId, taskId);
