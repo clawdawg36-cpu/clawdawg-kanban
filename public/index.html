@@ -2721,9 +2721,13 @@ input[type="date"] {
         <button class="attachment-upload-btn" onclick="uploadAttachments()">Upload</button>
       </div>
     </div>
+    <div class="modal-error-banner" id="modalErrorBanner">
+      <span>⚠️</span>
+      <span id="modalErrorText">Failed to save. Please try again.</span>
+    </div>
     <div class="modal-actions">
       <button class="btn-cancel" onclick="closeModal()">Cancel</button>
-      <button class="btn-save" onclick="saveTask()">Save Task</button>
+      <button class="btn-save" id="btnSaveTask" onclick="saveTask()">Save Task</button>
     </div>
 
     <!-- Activity & Comments (only shown when editing) -->
@@ -2901,17 +2905,52 @@ function isBlocked(taskId) {
   });
 }
 
+function showBoardLoading() {
+  document.getElementById('boardLoadingOverlay').classList.add('visible');
+  document.getElementById('boardErrorState').classList.remove('visible');
+}
+
+function hideBoardLoading() {
+  document.getElementById('boardLoadingOverlay').classList.remove('visible');
+}
+
+function showBoardError(msg) {
+  hideBoardLoading();
+  const errEl = document.getElementById('boardErrorState');
+  const msgEl = document.getElementById('boardErrorMsg');
+  if (msgEl) msgEl.textContent = msg || 'Something went wrong while fetching tasks. Check your connection and try again.';
+  errEl.classList.add('visible');
+}
+
+function hideBoardError() {
+  document.getElementById('boardErrorState').classList.remove('visible');
+}
+
+function retryLoad() {
+  hideBoardError();
+  loadTasks();
+}
+
 async function loadTasks() {
-  const [tasksRes, depsRes] = await Promise.all([
-    fetch(`/api/tasks?projectId=${encodeURIComponent(activeProjectId)}`),
-    fetch('/api/dependencies'),
-  ]);
-  tasks = await tasksRes.json();
-  dependencies = await depsRes.json();
-  render();
-  // Update sidebar count for active project
-  projectTaskCounts[activeProjectId] = tasks.length;
-  if (typeof renderSidebar === 'function') renderSidebar();
+  showBoardLoading();
+  try {
+    const [tasksRes, depsRes] = await Promise.all([
+      fetch(`/api/tasks?projectId=${encodeURIComponent(activeProjectId)}`),
+      fetch('/api/dependencies'),
+    ]);
+    if (!tasksRes.ok) throw new Error(`Server error: ${tasksRes.status} ${tasksRes.statusText}`);
+    tasks = await tasksRes.json();
+    dependencies = await depsRes.json();
+    hideBoardLoading();
+    hideBoardError();
+    render();
+    // Update sidebar count for active project
+    projectTaskCounts[activeProjectId] = tasks.length;
+    if (typeof renderSidebar === 'function') renderSidebar();
+  } catch (err) {
+    console.error('loadTasks failed:', err);
+    showBoardError(`Failed to load tasks: ${err.message}`);
+  }
 }
 
 function matchesSearch(t) {
@@ -3151,7 +3190,24 @@ function esc(s) {
   return d.innerHTML;
 }
 
-// Drag and drop
+// ─── Toast System ─────────────────────────────────────────────────────────────
+function showToast(message, type = 'error', durationMs = 5000) {
+  const container = document.getElementById('toastContainer');
+  const toast = document.createElement('div');
+  toast.className = `toast toast-${type}`;
+  const icons = { error: '❌', success: '✅', warn: '⚠️', info: 'ℹ️' };
+  toast.innerHTML = `<span>${icons[type] || '❌'}</span><span style="flex:1">${esc(message)}</span><button class="toast-dismiss" onclick="this.parentElement.remove()">×</button>`;
+  container.appendChild(toast);
+  const timer = setTimeout(() => {
+    if (toast.isConnected) {
+      toast.style.animation = 'toastOut 0.25s ease forwards';
+      setTimeout(() => toast.remove(), 250);
+    }
+  }, durationMs);
+  toast.querySelector('.toast-dismiss').addEventListener('click', () => clearTimeout(timer));
+}
+
+// ─── Drag and drop ────────────────────────────────────────────────────────────
 let dragId = null;
 
 function onDragStart(e) {
