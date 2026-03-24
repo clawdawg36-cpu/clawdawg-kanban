@@ -2428,6 +2428,10 @@ input[type="date"] {
       </div>
     </div>
     <div class="field">
+      <label>⚡ Wave (optional)</label>
+      <input type="number" id="fWave" placeholder="e.g. 0, 1, 2..." min="0">
+    </div>
+    <div class="field">
       <label>Tags (comma-separated)</label>
       <input type="text" id="fTags" placeholder="bug, frontend">
     </div>
@@ -2802,6 +2806,8 @@ function cardHTML(t, q) {
        </div>`
     : '';
 
+  const waveBadge = t.wave != null ? `<div style="display:inline-flex;align-items:center;gap:3px;font-size:10px;font-weight:600;padding:2px 7px;border-radius:6px;background:rgba(116,185,255,0.15);color:var(--blue);border:1px solid rgba(116,185,255,0.3);margin-bottom:4px;">⚡ Wave ${t.wave}</div>` : '';
+
   // Subtask progress indicator
   let subtaskProgressHTML = '';
   if (Array.isArray(t.subtasks) && t.subtasks.length > 0) {
@@ -2827,6 +2833,7 @@ function cardHTML(t, q) {
     ${t.description ? `<div class="card-desc">${q ? highlightText(t.description, q) : esc(t.description)}</div>` : ''}
     ${blockedBanner}
     ${tags ? `<div class="card-tags">${tags}</div>` : ''}
+    ${waveBadge}
     ${t.column !== 'done' && t.dueDate ? dueBadgeHTML(t.dueDate) : ''}
     ${t.recurring ? `<div class="recurring-badge">🔄 ${t.recurring}</div>` : ''}
     ${subtaskProgressHTML}
@@ -3064,6 +3071,7 @@ function openModal(task) {
   document.getElementById('fDueDate').value = task && task.dueDate ? task.dueDate : '';
   document.getElementById('fTags').value = task ? (task.tags || []).join(', ') : '';
   document.getElementById('fRecurring').value = (task && task.recurring) ? task.recurring : '';
+  document.getElementById('fWave').value = (task && task.wave != null) ? task.wave : '';
 
   // Checklist
   currentChecklist = (task && Array.isArray(task.subtasks)) ? JSON.parse(JSON.stringify(task.subtasks)) : [];
@@ -3286,6 +3294,7 @@ async function saveTask() {
     tags: tagsRaw ? tagsRaw.split(',').map(s => s.trim()).filter(Boolean) : [],
     recurring: document.getElementById('fRecurring').value || null,
     subtasks: currentChecklist.length > 0 ? currentChecklist : null,
+    wave: document.getElementById('fWave').value !== '' ? parseInt(document.getElementById('fWave').value) : null,
   };
   if (!data.title) { document.getElementById('fTitle').focus(); return; }
 
