@@ -2457,6 +2457,110 @@ input[type="date"] {
     display: none !important;
   }
 }
+
+/* ─── Inline Confirmation ──────────────────────────────────────────────────── */
+.inline-confirm {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  animation: inlineConfirmIn 0.15s ease;
+}
+@keyframes inlineConfirmIn {
+  from { opacity: 0; transform: scale(0.9); }
+  to   { opacity: 1; transform: scale(1); }
+}
+.inline-confirm-label {
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+.inline-confirm-yes,
+.inline-confirm-no {
+  padding: 2px 7px;
+  border-radius: 5px;
+  border: none;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: var(--transition);
+}
+.inline-confirm-yes {
+  background: var(--red);
+  color: #fff;
+}
+.inline-confirm-yes:hover { filter: brightness(1.15); }
+.inline-confirm-no {
+  background: var(--surface2);
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+}
+.inline-confirm-no:hover { color: var(--text); }
+
+/* ─── Confirmation Modal ───────────────────────────────────────────────────── */
+#confirmModal {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.6);
+  backdrop-filter: blur(4px);
+  display: none;
+  place-items: center;
+  z-index: 200;
+}
+#confirmModal.open { display: grid; }
+.confirm-modal-box {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 28px 28px 22px;
+  width: 360px;
+  max-width: 90vw;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+  animation: modalIn 0.22s ease;
+}
+.confirm-modal-box h3 {
+  font-size: 16px;
+  font-weight: 700;
+  margin: 0 0 10px;
+  color: var(--text);
+}
+.confirm-modal-box p {
+  font-size: 13px;
+  color: var(--text-dim);
+  margin: 0 0 22px;
+  line-height: 1.55;
+}
+.confirm-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+.confirm-modal-cancel {
+  padding: 8px 18px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-dim);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: var(--transition);
+}
+.confirm-modal-cancel:hover { background: var(--surface2); color: var(--text); }
+.confirm-modal-confirm {
+  padding: 8px 18px;
+  border-radius: 8px;
+  border: none;
+  background: var(--red);
+  color: #fff;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: var(--transition);
+}
+.confirm-modal-confirm:hover { filter: brightness(1.12); }
 </style>
 </head>
 <body>
@@ -3028,26 +3132,27 @@ function render() {
       grouped[p].push(t);
     });
 
-    // Build HTML with swimlane section separators
-    let html = '';
+    // Build columns via document fragment to reduce DOM churn
+    const frag = document.createDocumentFragment();
+    const tmp = document.createElement('div');
     PRIORITY_ORDER.forEach(p => {
       if (!grouped[p].length) return;
       const meta = PRIORITY_META[p];
-      html += `<div class="swimlane-header">
+      tmp.innerHTML = `<div class="swimlane-header">
         <span class="swimlane-label" style="color:${meta.color}">${meta.emoji} ${meta.label}</span>
         <span class="swimlane-line"></span>
-      </div>`;
-      html += grouped[p].map(t => cardHTML(t, q)).join('');
+      </div>` + grouped[p].map(t => cardHTML(t, q)).join('');
+      while (tmp.firstChild) frag.appendChild(tmp.firstChild);
     });
-    list.innerHTML = html;
-
-    // Empty state per column
+    // Preserve or create .no-results node so we can reuse it
     let noRes = list.querySelector('.no-results');
     if (!noRes) {
       noRes = document.createElement('div');
       noRes.className = 'no-results';
-      list.appendChild(noRes);
     }
+    frag.appendChild(noRes);
+    list.innerHTML = '';
+    list.appendChild(frag);
     const hasFiltersActive = q || filterPriority || filterAssignee || activeFilter !== 'all';
     if (filtered.length === 0) {
       noRes.innerHTML = hasFiltersActive
@@ -3312,6 +3417,7 @@ document.querySelectorAll('.filter-btn').forEach(btn => {
 
   if (searchClear) {
     searchClear.addEventListener('click', () => {
+      clearTimeout(searchDebounceTimer);
       searchInput.value = '';
       searchQuery = '';
       searchClear.classList.remove('visible');
@@ -3789,11 +3895,13 @@ function buildAgentLogHTML(logs) {
 
 function startAgentLogRefresh(taskId) {
   stopAgentLogRefresh();
+  // When SSE is active, log.created events push new entries in real-time — no polling needed.
+  // Fall back to 10s interval poll when SSE is unavailable.
   agentLogRefreshInterval = setInterval(() => {
-    if (agentLogOpen && agentLogTaskId) loadAgentLog(agentLogTaskId, true);
+    if (!sseActive && agentLogOpen && agentLogTaskId) loadAgentLog(agentLogTaskId, true);
   }, 10000);
   const note = document.getElementById('agentLogRefreshNote');
-  if (note) note.textContent = 'Auto-refreshing every 10s while card is in-progress';
+  if (note) note.textContent = sseActive ? 'Live updates via SSE' : 'Auto-refreshing every 10s while card is in-progress';
 }
 
 function stopAgentLogRefresh() {
@@ -4102,14 +4210,24 @@ document.querySelectorAll('.mobile-col-tab').forEach(tab => {
 
 // Move task (mobile)
 async function moveTask(id, newCol) {
-  await fetch(`/api/tasks/${id}`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ column: newCol }),
-  });
   const task = tasks.find(t => t.id === id);
+  const originalCol = task ? task.column : null;
+  // Optimistic update
   if (task) task.column = newCol;
   render();
+  try {
+    const res = await fetch(`/api/tasks/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ column: newCol }),
+    });
+    if (!res.ok) throw new Error(`Server error: ${res.status}`);
+  } catch (err) {
+    // Revert on failure
+    if (task && originalCol) task.column = originalCol;
+    render();
+    showToast(`Failed to move card: ${err.message}`, 'error');
+  }
 }
 
 // Re-render on resize (crossing breakpoint)
@@ -4231,8 +4349,111 @@ async function moveTask(id, newCol) {
   await loadNotifications();
 }
 
-// Poll for new notifications every 30s
-setInterval(loadNotifications, 30000);
+// ─── SSE real-time board updates ─────────────────────────────────────────────
+// Connects to GET /api/events?projectId=X and updates board state on incoming events.
+// Falls back to polling when SSE is unavailable (e.g. environments blocking persistent connections).
+
+let sseConnection = null;
+let sseReconnectTimer = null;
+let sseActive = false; // true while a healthy SSE connection is established
+
+function connectSSE() {
+  // Don't double-connect
+  if (sseConnection && sseConnection.readyState === EventSource.OPEN) return;
+
+  if (sseReconnectTimer) { clearTimeout(sseReconnectTimer); sseReconnectTimer = null; }
+
+  const url = `/api/events?projectId=${encodeURIComponent(activeProjectId)}`;
+  sseConnection = new EventSource(url);
+
+  sseConnection.addEventListener('connected', () => {
+    sseActive = true;
+    console.log('[SSE] connected to project', activeProjectId);
+  });
+
+  // task.created — prepend to tasks array and re-render
+  sseConnection.addEventListener('task.created', (e) => {
+    try {
+      const { task } = JSON.parse(e.data);
+      if (task && task.projectId === activeProjectId) {
+        if (!tasks.find(t => t.id === task.id)) {
+          tasks.push(task);
+          render();
+        }
+      }
+    } catch(err) { console.error('[SSE] task.created parse error', err); }
+  });
+
+  // task.updated — replace in tasks array (or full reload if it's a card the modal is showing)
+  sseConnection.addEventListener('task.updated', (e) => {
+    try {
+      const { task } = JSON.parse(e.data);
+      if (task && task.projectId === activeProjectId) {
+        const idx = tasks.findIndex(t => t.id === task.id);
+        if (idx !== -1) {
+          tasks[idx] = task;
+        } else {
+          tasks.push(task);
+        }
+        render();
+        // If this task's card is open in the modal, refresh the notification badge
+        loadNotifications();
+      }
+    } catch(err) { console.error('[SSE] task.updated parse error', err); }
+  });
+
+  // task.deleted — remove from tasks array
+  sseConnection.addEventListener('task.deleted', (e) => {
+    try {
+      const { taskId } = JSON.parse(e.data);
+      if (taskId) {
+        tasks = tasks.filter(t => t.id !== taskId);
+        render();
+      }
+    } catch(err) { console.error('[SSE] task.deleted parse error', err); }
+  });
+
+  // log.created — append to the agent log panel if it's open for this task
+  sseConnection.addEventListener('log.created', (e) => {
+    try {
+      const { log } = JSON.parse(e.data);
+      if (log && agentLogOpen && agentLogTaskId === log.taskId) {
+        // Append the single new log entry to the panel without a full fetch
+        const prev = agentLogLastTimestamp ? new Date(agentLogLastTimestamp) : null;
+        const logTs = new Date(log.timestamp);
+        if (!prev || logTs > prev) {
+          appendAgentLog([log]);
+          agentLogLastTimestamp = log.timestamp;
+        }
+      }
+    } catch(err) { console.error('[SSE] log.created parse error', err); }
+  });
+
+  sseConnection.onerror = () => {
+    sseActive = false;
+    sseConnection.close();
+    sseConnection = null;
+    // Exponential back-off: reconnect after 5s (simple fixed delay for now)
+    sseReconnectTimer = setTimeout(connectSSE, 5000);
+  };
+}
+
+// Reconnect SSE when switching projects
+const _origSwitchProject = typeof switchProject === 'function' ? switchProject : null;
+function switchProject(projectId) {
+  if (_origSwitchProject) _origSwitchProject(projectId);
+  // Reconnect SSE to new project
+  if (sseConnection) { sseConnection.close(); sseConnection = null; sseActive = false; }
+  connectSSE();
+}
+
+// Poll for new notifications every 60s as fallback when SSE is active, 30s otherwise
+setInterval(() => {
+  if (!sseActive) loadNotifications();
+}, 30000);
+setInterval(() => {
+  if (sseActive) loadNotifications();
+}, 60000);
 
 // ─── Stats Dashboard ──────────────────────────────────────────────────────────
 function formatDuration(seconds) {
@@ -4770,6 +4991,7 @@ initSidebar();
 loadProjects();
 loadTasks();
 loadNotifications();
+connectSSE();
 </script>
 </body>
 </html>
