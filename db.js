@@ -5,8 +5,33 @@ const fs = require('fs');
 const DB_PATH = path.join(__dirname, 'kanban.db');
 const TASKS_JSON = path.join(__dirname, 'tasks.json');
 
-const db = new Database(DB_PATH);
+// Open the database — wrap in try/catch so permission errors and corruption
+// produce a clear diagnostic instead of a raw stack trace.
+let db;
+try {
+  db = new Database(DB_PATH);
+} catch (err) {
+  console.error(`[kanban] FATAL: could not open database at ${DB_PATH}`);
+  console.error(`[kanban] Reason: ${err.message}`);
+  console.error('[kanban] Check file permissions, disk space, or restore from kanban.db.bak');
+  process.exit(1);
+}
+
 db.pragma('journal_mode = WAL');
+
+// Integrity check — warn if the database is corrupt but don't hard-exit;
+// the server can still serve stale data while the operator decides what to do.
+try {
+  const results = db.pragma('integrity_check');
+  const ok = results.length === 1 && results[0].integrity_check === 'ok';
+  if (!ok) {
+    console.warn('[kanban] WARNING: PRAGMA integrity_check returned problems:');
+    results.forEach(r => console.warn('  ', r.integrity_check));
+    console.warn('[kanban] Consider restoring from kanban.db.bak and restarting.');
+  }
+} catch (err) {
+  console.warn(`[kanban] WARNING: could not run integrity_check: ${err.message}`);
+}
 
 // Projects table
 db.exec(`

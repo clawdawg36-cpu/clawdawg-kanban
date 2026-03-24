@@ -2695,6 +2695,26 @@ input[type="date"] {
         <option value="ClawDawg">ClawDawg</option>
       </select>
     </div>
+    <div class="search-filter-group">
+      <span class="search-filter-label">Wave</span>
+      <select class="search-select" id="filterWave">
+        <option value="">All</option>
+      </select>
+    </div>
+    <div class="search-filter-group">
+      <span class="search-filter-label">Agent</span>
+      <select class="search-select" id="filterAgentStatus">
+        <option value="">All</option>
+        <option value="idle">Idle</option>
+        <option value="claimed">Claimed</option>
+        <option value="in-progress">In Progress</option>
+        <option value="done">Done</option>
+      </select>
+    </div>
+    <div class="search-toggle-group">
+      <button class="search-toggle-btn" id="filterBlocked" title="Show only blocked tasks">🚫 Blocked</button>
+      <button class="search-toggle-btn" id="filterOverdue" title="Show only overdue tasks">⚠️ Overdue</button>
+    </div>
     <span class="search-results-info" id="searchResultsInfo"></span>
     <button class="search-reset-btn" id="searchResetBtn" onclick="resetSearch()">Reset filters</button>
   </div>
@@ -3164,6 +3184,10 @@ const PRIORITY_META = {
 let searchQuery = '';
 let filterPriority = '';
 let filterAssignee = '';
+let filterWave = '';
+let filterAgentStatus = '';
+let filterBlocked = false;
+let filterOverdue = false;
 let searchDebounceTimer = null;
 
 // --- Dependency helpers ---
@@ -3238,6 +3262,24 @@ function matchesSearch(t) {
   }
   if (filterPriority && t.priority !== filterPriority) return false;
   if (filterAssignee && t.assignee !== filterAssignee) return false;
+  if (filterWave !== '') {
+    const waveNum = filterWave === 'none' ? null : parseInt(filterWave, 10);
+    if (waveNum === null) {
+      if (t.wave != null && t.wave !== '') return false;
+    } else {
+      if (t.wave == null || parseInt(t.wave, 10) !== waveNum) return false;
+    }
+  }
+  if (filterAgentStatus) {
+    const agentCol = t.agentStatus || t.column;
+    if (agentCol !== filterAgentStatus) return false;
+  }
+  if (filterBlocked && !isBlocked(t.id)) return false;
+  if (filterOverdue) {
+    if (!t.dueDate) return false;
+    const due = new Date(t.dueDate + 'T23:59:59');
+    if (due >= new Date() || t.column === 'done') return false;
+  }
   return true;
 }
 
@@ -3303,7 +3345,7 @@ function render() {
     frag.appendChild(noRes);
     list.innerHTML = '';
     list.appendChild(frag);
-    const hasFiltersActive = q || filterPriority || filterAssignee;
+    const hasFiltersActive = q || filterPriority || filterAssignee || filterWave !== '' || filterAgentStatus || filterBlocked || filterOverdue;
     if (filtered.length === 0) {
       noRes.innerHTML = hasFiltersActive
         ? 'No matching cards'
@@ -3346,7 +3388,7 @@ function render() {
   }
 
   // Update results info
-  const hasFilters = q || filterPriority || filterAssignee;
+  const hasFilters = q || filterPriority || filterAssignee || filterWave !== '' || filterAgentStatus || filterBlocked || filterOverdue;
   const infoEl = document.getElementById('searchResultsInfo');
   const resetBtn = document.getElementById('searchResetBtn');
   if (hasFilters) {
