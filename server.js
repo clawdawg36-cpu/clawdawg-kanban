@@ -1723,6 +1723,17 @@ app.post('/api/notifications/read', (req, res) => {
   }
 });
 
+// Mark a single notification as read
+app.post('/api/notifications/:id/read', (req, res) => {
+  try {
+    db.prepare('UPDATE notifications SET is_read = 1 WHERE id = ?').run(req.params.id);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 // Dismiss / delete a notification
 app.delete('/api/notifications/:id', (req, res) => {
   try {

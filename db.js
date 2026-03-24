@@ -111,6 +111,12 @@ if (!cols.includes('agentStartedAt')) {
   db.exec('ALTER TABLE tasks ADD COLUMN agentStartedAt TEXT DEFAULT NULL');
   console.log('Migrated: added agentStartedAt column to tasks table');
 }
+if (!cols.includes('sortOrder')) {
+  db.exec('ALTER TABLE tasks ADD COLUMN sortOrder REAL DEFAULT NULL');
+  // Seed existing tasks with sortOrder = rowid so relative ordering is preserved
+  db.exec("UPDATE tasks SET sortOrder = rowid WHERE sortOrder IS NULL");
+  console.log('Migrated: added sortOrder column to tasks table');
+}
 
 // Ensure default project exists and assign orphaned tasks to it
 const defaultProject = db.prepare("SELECT id FROM projects WHERE id = 'default'").get();
