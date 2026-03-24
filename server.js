@@ -475,10 +475,6 @@ app.post('/api/tasks/:id/spawn', async (req, res) => {
     const crypto = require('crypto');
     const sessionKey = `kanban-${task.id}-${crypto.randomBytes(4).toString('hex')}`;
 
-    // Write prompt to a temp file to avoid shell escaping issues
-    const tmpFile = require('path').join(os.tmpdir(), `kanban-spawn-${sessionKey}.txt`);
-    require('fs').writeFileSync(tmpFile, taskPrompt, 'utf8');
-
     // Spawn openclaw agent as a detached background process (fire-and-forget)
     const { spawn } = require('child_process');
     const agentArgs = [
@@ -497,9 +493,6 @@ app.post('/api/tasks/:id/spawn', async (req, res) => {
       env,
     });
     child.unref();
-
-    // Clean up temp file after a short delay
-    setTimeout(() => { try { require('fs').unlinkSync(tmpFile); } catch(e) {} }, 5000);
 
     // Lock the card and store agent session ID
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
