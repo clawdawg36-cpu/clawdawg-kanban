@@ -919,7 +919,6 @@ app.delete('/api/templates/:id', (req, res) => {
 app.get('/api/tasks', (req, res) => {
   try {
     const projectId = req.query.projectId || 'default';
-    const usePagination = req.query.limit !== undefined || req.query.offset !== undefined;
     const limit = Math.max(1, Math.min(1000, parseInt(req.query.limit, 10) || 200));
     const offset = Math.max(0, parseInt(req.query.offset, 10) || 0);
 
@@ -929,36 +928,29 @@ app.get('/api/tasks', (req, res) => {
     // Tags are stored as JSON arrays; use exact Array.includes() match.
     const filterTag = req.query.tag !== undefined ? req.query.tag : null;
 
-    // Get total count for pagination envelope (before tag filter, which is in-JS)
-    // If tag filter is active we need full rows to filter, then count — fetch all for tag case.
     let rows;
     let total;
     if (filterTag !== null) {
-      // Tag filter requires in-JS processing — fetch all matching rows then paginate
+      // Tag filter requires in-JS processing; paginate after filtering.
       const allRows = db.prepare("SELECT * FROM tasks WHERE projectId = ?").all(projectId);
-      rows = allRows.filter(row => {
+      const filteredRows = allRows.filter(row => {
         try {
           return JSON.parse(row.tags || '[]').includes(filterTag);
-        } catch { return false; }
+        } catch {
+          return false;
+        }
       });
-      total = rows.length;
-      if (usePagination) {
-        rows = rows.slice(offset, offset + limit);
-      }
+      total = filteredRows.length;
+      rows = filteredRows.slice(offset, offset + limit);
     } else {
-      // No tag filter — use SQL LIMIT/OFFSET for efficiency
       total = db.prepare("SELECT COUNT(*) AS cnt FROM tasks WHERE projectId = ?").get(projectId).cnt;
-      if (usePagination) {
-        rows = db.prepare("SELECT * FROM tasks WHERE projectId = ? LIMIT ? OFFSET ?").all(projectId, limit, offset);
-      } else {
-        rows = db.prepare("SELECT * FROM tasks WHERE projectId = ?").all(projectId);
-      }
+      rows = db.prepare("SELECT * FROM tasks WHERE projectId = ? LIMIT ? OFFSET ?").all(projectId, limit, offset);
     }
 
-    // Compute blocked status — need doneIds from the full set when paginating
-    const doneIds = usePagination
-      ? new Set(db.prepare("SELECT id FROM tasks WHERE projectId = ? AND \"column\" = 'done'").all(projectId).map(r => r.id))
-      : new Set(rows.filter(r => r.column === 'done').map(r => r.id));
+    // Compute blocked status against the full project's done set, not just this page.
+    const doneIds = new Set(
+      db.prepare("SELECT id FROM tasks WHERE projectId = ? AND \"column\" = 'done'").all(projectId).map(r => r.id)
+    );
 
     const items = rows.map(row => ({
       ...row,
@@ -977,11 +969,7 @@ app.get('/api/tasks', (req, res) => {
       })(),
     }));
 
-    if (usePagination) {
-      res.json({ total, limit, offset, items });
-    } else {
-      res.json(items);
-    }
+    res.json({ total, limit, offset, items });
   } catch (err) {
     console.error('GET /api/tasks error:', err);
     res.status(500).json({ error: 'Internal server error' });
@@ -1727,17 +1715,19 @@ app.get('/api/notifications', (req, res) => {
     const limit = Math.min(parseInt(req.query.limit, 10) || 50, 200);
     const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
     const { projectId } = req.query;
-    let rows;
+    let rows, total;
     if (projectId) {
       rows = db.prepare(
         'SELECT * FROM notifications WHERE project_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?'
       ).all(projectId, limit, offset);
+      total = db.prepare('SELECT COUNT(*) as count FROM notifications WHERE project_id = ?').get(projectId).count;
     } else {
       rows = db.prepare(
         'SELECT * FROM notifications ORDER BY created_at DESC LIMIT ? OFFSET ?'
       ).all(limit, offset);
+      total = db.prepare('SELECT COUNT(*) as count FROM notifications').get().count;
     }
-    res.json(rows);
+    res.json({ total, limit, offset, items: rows });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Internal server error" });

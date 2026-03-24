@@ -3602,17 +3602,41 @@ function populateAssigneeSelect() {
   }
 }
 
+async function fetchAllTasksForProject(projectId) {
+  const pageSize = 200;
+  let offset = 0;
+  let allTasks = [];
+
+  while (true) {
+    const res = await fetch(`/api/tasks?projectId=${encodeURIComponent(projectId)}&limit=${pageSize}&offset=${offset}`);
+    if (!res.ok) throw new Error(`Server error: ${res.status} ${res.statusText}`);
+
+    const data = await res.json();
+
+    // Backward compatibility with older servers that still return a plain array.
+    if (Array.isArray(data)) {
+      return data;
+    }
+
+    const items = Array.isArray(data.items) ? data.items : [];
+    allTasks = allTasks.concat(items);
+
+    if (items.length === 0 || allTasks.length >= (data.total || 0)) {
+      return allTasks;
+    }
+
+    offset += data.limit || pageSize;
+  }
+}
+
 async function loadTasks() {
   showBoardLoading();
   try {
-    const [tasksRes, depsRes] = await Promise.all([
-      fetch(`/api/tasks?projectId=${encodeURIComponent(activeProjectId)}`),
+    const [loadedTasks, depsRes] = await Promise.all([
+      fetchAllTasksForProject(activeProjectId),
       fetch('/api/dependencies'),
     ]);
-    if (!tasksRes.ok) throw new Error(`Server error: ${tasksRes.status} ${tasksRes.statusText}`);
-    const tasksData = await tasksRes.json();
-    // Handle both paginated envelope { total, limit, offset, items } and plain array
-    tasks = Array.isArray(tasksData) ? tasksData : (tasksData.items || []);
+    tasks = loadedTasks;
     dependencies = await depsRes.json();
     hideBoardLoading();
     hideBoardError();
@@ -5247,8 +5271,13 @@ const COL_EMOJI = {
 
 async function loadNotifications() {
   try {
-    const res = await fetch('/api/notifications');
-    notifications = await res.json();
+    const params = new URLSearchParams();
+    if (typeof activeProjectId !== 'undefined' && activeProjectId) {
+      params.set('projectId', activeProjectId);
+    }
+    const res = await fetch(`/api/notifications?${params.toString()}`);
+    const data = await res.json();
+    notifications = data.items || data;
     renderNotifications();
   } catch (e) { /* ignore */ }
 }
