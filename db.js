@@ -4,6 +4,21 @@ const fs = require('fs');
 
 const DB_PATH = path.join(__dirname, 'kanban.db');
 const TASKS_JSON = path.join(__dirname, 'tasks.json');
+const TASKS_SCHEMA_V1_COLUMNS = [
+  'dueDate',
+  'recurring',
+  'subtasks',
+  'projectId',
+  'lockedBy',
+  'lockedAt',
+  'lockExpiresAt',
+  'blockedBy',
+  'wave',
+  'handoffLog',
+  'agentSessionId',
+  'agentStartedAt',
+];
+const LATEST_SCHEMA_VERSION = 3;
 
 // Open the database with error handling — better-sqlite3 throws synchronously
 // on corruption or permission errors, so we catch and exit gracefully.
@@ -85,56 +100,121 @@ db.exec(`
   )
 `);
 
-// Migrate: add columns if they don't exist (for existing databases)
-const cols = db.prepare("PRAGMA table_info(tasks)").all().map(c => c.name);
-if (!cols.includes('dueDate')) {
-  db.exec('ALTER TABLE tasks ADD COLUMN dueDate TEXT DEFAULT NULL');
-  console.log('Migrated: added dueDate column to tasks table');
+// Notifications table
+db.exec(`
+  CREATE TABLE IF NOT EXISTS notifications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id TEXT NOT NULL,
+    task_title TEXT NOT NULL,
+    from_col TEXT NOT NULL,
+    to_col TEXT NOT NULL,
+    changed_by TEXT DEFAULT 'Mike',
+    created_at TEXT NOT NULL,
+    is_read INTEGER DEFAULT 0
+  )
+`);
+
+function getTableColumns(tableName) {
+  return db.prepare(`PRAGMA table_info(${tableName})`).all().map(c => c.name);
 }
-if (!cols.includes('recurring')) {
-  db.exec('ALTER TABLE tasks ADD COLUMN recurring TEXT DEFAULT NULL');
-  console.log('Migrated: added recurring column to tasks table');
+
+function getUserVersion() {
+  return db.pragma('user_version', { simple: true });
 }
-if (!cols.includes('subtasks')) {
-  db.exec('ALTER TABLE tasks ADD COLUMN subtasks TEXT DEFAULT NULL');
-  console.log('Migrated: added subtasks column to tasks table');
+
+function setUserVersion(version) {
+  db.pragma(`user_version = ${version}`);
 }
-if (!cols.includes('projectId')) {
-  db.exec('ALTER TABLE tasks ADD COLUMN projectId TEXT DEFAULT NULL');
-  console.log('Migrated: added projectId column to tasks table');
+
+function detectLegacySchemaVersion() {
+  const taskCols = getTableColumns('tasks');
+  const projectCols = getTableColumns('projects');
+  const notificationCols = getTableColumns('notifications');
+
+  let version = 0;
+  if (TASKS_SCHEMA_V1_COLUMNS.every(col => taskCols.includes(col))) version = 1;
+  if (projectCols.includes('agentConfig')) version = 2;
+  if (notificationCols.includes('project_id')) version = 3;
+  return version;
 }
-if (!cols.includes('lockedBy')) {
-  db.exec('ALTER TABLE tasks ADD COLUMN lockedBy TEXT DEFAULT NULL');
-  console.log('Migrated: added lockedBy column to tasks table');
-}
-if (!cols.includes('lockedAt')) {
-  db.exec('ALTER TABLE tasks ADD COLUMN lockedAt TEXT DEFAULT NULL');
-  console.log('Migrated: added lockedAt column to tasks table');
-}
-if (!cols.includes('lockExpiresAt')) {
-  db.exec('ALTER TABLE tasks ADD COLUMN lockExpiresAt TEXT DEFAULT NULL');
-  console.log('Migrated: added lockExpiresAt column to tasks table');
-}
-if (!cols.includes('blockedBy')) {
-  db.exec("ALTER TABLE tasks ADD COLUMN blockedBy TEXT DEFAULT '[]'");
-  console.log('Migrated: added blockedBy column to tasks table');
-}
-if (!cols.includes('wave')) {
-  db.exec('ALTER TABLE tasks ADD COLUMN wave INTEGER DEFAULT NULL');
-  console.log('Migrated: added wave column to tasks table');
-}
-if (!cols.includes('handoffLog')) {
-  db.exec("ALTER TABLE tasks ADD COLUMN handoffLog TEXT DEFAULT '[]'");
-  console.log('Migrated: added handoffLog column to tasks table');
-}
-if (!cols.includes('agentSessionId')) {
-  db.exec('ALTER TABLE tasks ADD COLUMN agentSessionId TEXT DEFAULT NULL');
-  console.log('Migrated: added agentSessionId column to tasks table');
-}
-if (!cols.includes('agentStartedAt')) {
-  db.exec('ALTER TABLE tasks ADD COLUMN agentStartedAt TEXT DEFAULT NULL');
-  console.log('Migrated: added agentStartedAt column to tasks table');
-}
+
+const migrations = [
+  {
+    version: 1,
+    apply() {
+      const cols = getTableColumns('tasks');
+      const addColumn = (name, sql, message) => {
+        if (!cols.includes(name)) {
+          db.exec(sql);
+          console.log(message);
+        }
+      };
+
+      addColumn('dueDate', 'ALTER TABLE tasks ADD COLUMN dueDate TEXT DEFAULT NULL', 'Migrated: added dueDate column to tasks table');
+      addColumn('recurring', 'ALTER TABLE tasks ADD COLUMN recurring TEXT DEFAULT NULL', 'Migrated: added recurring column to tasks table');
+      addColumn('subtasks', 'ALTER TABLE tasks ADD COLUMN subtasks TEXT DEFAULT NULL', 'Migrated: added subtasks column to tasks table');
+      addColumn('projectId', 'ALTER TABLE tasks ADD COLUMN projectId TEXT DEFAULT NULL', 'Migrated: added projectId column to tasks table');
+      addColumn('lockedBy', 'ALTER TABLE tasks ADD COLUMN lockedBy TEXT DEFAULT NULL', 'Migrated: added lockedBy column to tasks table');
+      addColumn('lockedAt', 'ALTER TABLE tasks ADD COLUMN lockedAt TEXT DEFAULT NULL', 'Migrated: added lockedAt column to tasks table');
+      addColumn('lockExpiresAt', 'ALTER TABLE tasks ADD COLUMN lockExpiresAt TEXT DEFAULT NULL', 'Migrated: added lockExpiresAt column to tasks table');
+      addColumn('blockedBy', "ALTER TABLE tasks ADD COLUMN blockedBy TEXT DEFAULT '[]'", 'Migrated: added blockedBy column to tasks table');
+      addColumn('wave', 'ALTER TABLE tasks ADD COLUMN wave INTEGER DEFAULT NULL', 'Migrated: added wave column to tasks table');
+      addColumn('handoffLog', "ALTER TABLE tasks ADD COLUMN handoffLog TEXT DEFAULT '[]'", 'Migrated: added handoffLog column to tasks table');
+      addColumn('agentSessionId', 'ALTER TABLE tasks ADD COLUMN agentSessionId TEXT DEFAULT NULL', 'Migrated: added agentSessionId column to tasks table');
+      addColumn('agentStartedAt', 'ALTER TABLE tasks ADD COLUMN agentStartedAt TEXT DEFAULT NULL', 'Migrated: added agentStartedAt column to tasks table');
+    },
+  },
+  {
+    version: 2,
+    apply() {
+      const projCols = getTableColumns('projects');
+      if (!projCols.includes('agentConfig')) {
+        db.exec("ALTER TABLE projects ADD COLUMN agentConfig TEXT DEFAULT NULL");
+        console.log('Migrated: added agentConfig column to projects table');
+      }
+    },
+  },
+  {
+    version: 3,
+    apply() {
+      const notificationCols = getTableColumns('notifications');
+      if (!notificationCols.includes('project_id')) {
+        db.exec("ALTER TABLE notifications ADD COLUMN project_id TEXT");
+        db.exec("CREATE INDEX IF NOT EXISTS idx_notifications_project_id ON notifications(project_id)");
+        db.exec("UPDATE notifications SET project_id = (SELECT projectId FROM tasks WHERE tasks.id = notifications.task_id) WHERE project_id IS NULL");
+        console.log('Migrated: added project_id column to notifications table');
+      }
+    },
+  },
+];
+
+const applyMigrations = db.transaction(() => {
+  let currentVersion = getUserVersion();
+
+  if (currentVersion === 0) {
+    const detectedVersion = detectLegacySchemaVersion();
+    if (detectedVersion > 0) {
+      setUserVersion(detectedVersion);
+      currentVersion = detectedVersion;
+      console.log(`Backfilled schema version to ${detectedVersion}`);
+    }
+  }
+
+  for (const migration of migrations) {
+    if (currentVersion < migration.version) {
+      migration.apply();
+      setUserVersion(migration.version);
+      currentVersion = migration.version;
+      console.log(`Schema version is now ${migration.version}`);
+    }
+  }
+
+  if (currentVersion !== LATEST_SCHEMA_VERSION) {
+    setUserVersion(LATEST_SCHEMA_VERSION);
+  }
+});
+
+applyMigrations();
 
 // Ensure default project exists and assign orphaned tasks to it
 const defaultProject = db.prepare("SELECT id FROM projects WHERE id = 'default'").get();
@@ -197,27 +277,6 @@ db.exec(`
   )
 `);
 
-// Migrate: add agentConfig column to projects if it doesn't exist
-const projCols = db.prepare("PRAGMA table_info(projects)").all().map(c => c.name);
-if (!projCols.includes('agentConfig')) {
-  db.exec("ALTER TABLE projects ADD COLUMN agentConfig TEXT DEFAULT NULL");
-  console.log('Migrated: added agentConfig column to projects table');
-}
-
-// Notifications table
-db.exec(`
-  CREATE TABLE IF NOT EXISTS notifications (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    task_id TEXT NOT NULL,
-    task_title TEXT NOT NULL,
-    from_col TEXT NOT NULL,
-    to_col TEXT NOT NULL,
-    changed_by TEXT DEFAULT 'Mike',
-    created_at TEXT NOT NULL,
-    is_read INTEGER DEFAULT 0
-  )
-`);
-
 // Webhooks table
 db.exec(`
   CREATE TABLE IF NOT EXISTS webhooks (
@@ -252,17 +311,7 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_agent_logs_taskId ON agent_logs(taskId);
   CREATE INDEX IF NOT EXISTS idx_task_dependencies_blocked_id ON task_dependencies(blocked_id);
   CREATE INDEX IF NOT EXISTS idx_notifications_task_id ON notifications(task_id);
+  CREATE INDEX IF NOT EXISTS idx_notifications_project_id ON notifications(project_id);
 `);
-
-// Migration: add project_id column to notifications if missing
-(function() {
-  const cols = db.prepare("PRAGMA table_info(notifications)").all().map(c => c.name);
-  if (!cols.includes('project_id')) {
-    db.exec("ALTER TABLE notifications ADD COLUMN project_id TEXT");
-    db.exec("CREATE INDEX IF NOT EXISTS idx_notifications_project_id ON notifications(project_id)");
-    // Backfill from tasks table
-    db.exec("UPDATE notifications SET project_id = (SELECT projectId FROM tasks WHERE tasks.id = notifications.task_id) WHERE project_id IS NULL");
-  }
-})();
 
 module.exports = db;
