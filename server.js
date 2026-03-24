@@ -1179,6 +1179,19 @@ app.post('/api/tasks', (req, res) => {
     }
 
     const blockedByArr = Array.isArray(req.body.blockedBy) ? req.body.blockedBy : [];
+
+    // Validate blockedBy IDs exist and belong to the same project before inserting
+    const taskProjectId = req.body.projectId || 'default';
+    for (const blockerId of blockedByArr) {
+      const blockerRow = db.prepare('SELECT id, projectId FROM tasks WHERE id = ?').get(blockerId);
+      if (!blockerRow) {
+        return res.status(400).json({ error: `Blocker task ${blockerId} does not exist` });
+      }
+      if (blockerRow.projectId !== taskProjectId) {
+        return res.status(400).json({ error: `Blocker task ${blockerId} belongs to a different project and cannot block this task` });
+      }
+    }
+
     const task = {
       id: Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
       title: req.body.title || 'Untitled',
@@ -1198,13 +1211,8 @@ app.post('/api/tasks', (req, res) => {
       'INSERT INTO tasks (id, title, description, assignee, priority, tags, "column", createdAt, recurring, subtasks, projectId, wave, blockedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
     ).run(task.id, task.title, task.description, task.assignee, task.priority, JSON.stringify(task.tags), task.column, task.createdAt, task.recurring, task.subtasks ? JSON.stringify(task.subtasks) : null, task.projectId, task.wave, JSON.stringify(blockedByArr));
 
-    // Sync blockedBy to task_dependencies
+    // Sync blockedBy to task_dependencies (already validated above)
     for (const blockerId of blockedByArr) {
-      const blockerExists = db.prepare('SELECT id, projectId FROM tasks WHERE id = ?').get(blockerId);
-      if (!blockerExists) continue;
-      if (blockerExists.projectId !== task.projectId) {
-        return res.status(400).json({ error: `Blocker task ${blockerId} belongs to a different project and cannot block this task` });
-      }
       db.prepare('INSERT OR IGNORE INTO task_dependencies (blocker_id, blocked_id) VALUES (?, ?)').run(blockerId, task.id);
     }
 
@@ -1265,12 +1273,15 @@ app.put('/api/tasks/:id', (req, res) => {
     updated.blockedBy = existing.blockedBy ? JSON.parse(existing.blockedBy) : [];
   }
 
-  // Validate cross-project blockedBy references
+  // Validate blockedBy IDs exist and belong to the same project
   if (req.body.blockedBy !== undefined) {
     const taskProjectId = updated.projectId || existing.projectId || 'default';
     for (const blockerId of updated.blockedBy) {
-      const blockerExists = db.prepare('SELECT id, projectId FROM tasks WHERE id = ?').get(blockerId);
-      if (blockerExists && blockerExists.projectId !== taskProjectId) {
+      const blockerRow = db.prepare('SELECT id, projectId FROM tasks WHERE id = ?').get(blockerId);
+      if (!blockerRow) {
+        return res.status(400).json({ error: `Blocker task ${blockerId} does not exist` });
+      }
+      if (blockerRow.projectId !== taskProjectId) {
         return res.status(400).json({ error: `Blocker task ${blockerId} belongs to a different project and cannot block this task` });
       }
     }
