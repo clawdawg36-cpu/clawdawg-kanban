@@ -76,8 +76,53 @@ app.delete('/api/projects/:id', (req, res) => {
 // Get all tasks (optionally filtered by projectId)
 app.get('/api/tasks', (req, res) => {
   const projectId = req.query.projectId || 'default';
+  // Auto-expire stale locks before returning results
+  db.prepare(`
+    UPDATE tasks SET lockedBy = NULL, lockedAt = NULL, lockExpiresAt = NULL
+    WHERE lockExpiresAt IS NOT NULL AND lockExpiresAt < datetime('now')
+  `).run();
   const rows = db.prepare("SELECT * FROM tasks WHERE projectId = ?").all(projectId);
   res.json(rows.map(row => ({ ...row, tags: JSON.parse(row.tags), subtasks: row.subtasks ? JSON.parse(row.subtasks) : null })));
+});
+
+// POST /api/tasks/:id/claim — atomically lock a card
+app.post('/api/tasks/:id/claim', (req, res) => {
+  const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id);
+  if (!task) return res.status(404).json({ error: 'Not found' });
+
+  // Check if task is currently locked by someone else
+  if (task.lockedBy && task.lockExpiresAt) {
+    const expiry = db.prepare("SELECT lockExpiresAt > datetime('now') as active FROM tasks WHERE id = ?").get(req.params.id);
+    if (expiry && expiry.active) {
+      return res.status(409).json({ error: 'Task already locked', lockedBy: task.lockedBy, lockExpiresAt: task.lockExpiresAt });
+    }
+  }
+
+  const now = new Date().toISOString();
+  const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+  const agentSessionId = req.body.agentSessionId;
+
+  db.prepare('UPDATE tasks SET lockedBy = ?, lockedAt = ?, lockExpiresAt = ? WHERE id = ?')
+    .run(agentSessionId, now, expiresAt, req.params.id);
+
+  const updated = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id);
+  res.json({ ...updated, tags: JSON.parse(updated.tags), subtasks: updated.subtasks ? JSON.parse(updated.subtasks) : null });
+});
+
+// POST /api/tasks/:id/release — release a lock
+app.post('/api/tasks/:id/release', (req, res) => {
+  const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id);
+  if (!task) return res.status(404).json({ error: 'Not found' });
+
+  if (task.lockedBy !== req.body.agentSessionId) {
+    return res.status(403).json({ error: 'Not the lock owner' });
+  }
+
+  db.prepare('UPDATE tasks SET lockedBy = NULL, lockedAt = NULL, lockExpiresAt = NULL WHERE id = ?')
+    .run(req.params.id);
+
+  const updated = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id);
+  res.json({ ...updated, tags: JSON.parse(updated.tags), subtasks: updated.subtasks ? JSON.parse(updated.subtasks) : null });
 });
 
 // Create task
