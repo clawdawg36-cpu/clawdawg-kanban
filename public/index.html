@@ -2955,7 +2955,7 @@ kbd {
   </div>
   <div class="header-actions">
     <div class="notif-wrapper">
-      <button class="notif-btn" id="notifBtn" title="Notifications">
+      <button class="notif-btn" id="notifBtn" title="Notifications" aria-haspopup="true" aria-expanded="false" aria-label="Notifications">
         🔔
         <span class="notif-badge" id="notifBadge">0</span>
       </button>
@@ -3245,7 +3245,7 @@ kbd {
 
     <!-- Activity & Comments (only shown when editing) -->
     <div class="activity-section" id="activitySection" style="display:none">
-      <button class="activity-toggle" id="activityToggle">
+      <button class="activity-toggle" id="activityToggle" aria-expanded="false">
         <span>💬</span> Activity & Comments
         <span class="activity-toggle-arrow">▼</span>
       </button>
@@ -3267,7 +3267,7 @@ kbd {
 
     <!-- Handoff Log -->
     <div class="activity-section" id="handoffSection" style="display:none">
-      <button class="activity-toggle" id="handoffToggle">
+      <button class="activity-toggle" id="handoffToggle" aria-expanded="false">
         <span>🤝</span> Handoff Notes
         <span class="activity-toggle-arrow" id="handoffArrow">▼</span>
       </button>
@@ -3280,7 +3280,7 @@ kbd {
 
     <!-- Agent Log Tab -->
     <div class="activity-section" id="agentLogSection" style="display:none">
-      <button class="activity-toggle" id="agentLogToggle">
+      <button class="activity-toggle" id="agentLogToggle" aria-expanded="false">
         <span>📟</span> Agent Log
         <span class="activity-toggle-arrow" id="agentLogArrow">▼</span>
       </button>
@@ -4611,6 +4611,7 @@ function openModal(task) {
     actSection.style.display = '';
     activityOpen = false;
     document.getElementById('activityToggle').classList.remove('expanded');
+    document.getElementById('activityToggle').setAttribute('aria-expanded', 'false');
     document.getElementById('activityBody').classList.remove('open');
     document.getElementById('commentInput').value = '';
     currentTaskActivity = [];
@@ -4642,6 +4643,7 @@ function openModal(task) {
     handoffSection.style.display = '';
     handoffOpen = false;
     document.getElementById('handoffToggle').classList.remove('expanded');
+    document.getElementById('handoffToggle').setAttribute('aria-expanded', 'false');
     document.getElementById('handoffBody').classList.remove('open');
     currentHandoffLog = Array.isArray(task.handoffLog) ? task.handoffLog : [];
     renderHandoffLog();
@@ -4656,6 +4658,7 @@ function openModal(task) {
     agentLogTaskId = task.id;
     agentLogOpen = false;
     document.getElementById('agentLogToggle').classList.remove('expanded');
+    document.getElementById('agentLogToggle').setAttribute('aria-expanded', 'false');
     document.getElementById('agentLogBody').classList.remove('open');
     // Start auto-refresh if card is in-progress
     if (task.column === 'in-progress') {
@@ -4788,7 +4791,9 @@ function formatRelTime(iso) {
 
 function toggleActivity() {
   activityOpen = !activityOpen;
-  document.getElementById('activityToggle').classList.toggle('expanded', activityOpen);
+  const toggle = document.getElementById('activityToggle');
+  toggle.classList.toggle('expanded', activityOpen);
+  toggle.setAttribute('aria-expanded', String(activityOpen));
   document.getElementById('activityBody').classList.toggle('open', activityOpen);
   if (activityOpen) {
     const list = document.getElementById('activityList');
@@ -4806,7 +4811,9 @@ let agentLogLastTimestamp = null; // tracks the last seen log entry timestamp fo
 
 function toggleAgentLog() {
   agentLogOpen = !agentLogOpen;
-  document.getElementById('agentLogToggle').classList.toggle('expanded', agentLogOpen);
+  const toggle = document.getElementById('agentLogToggle');
+  toggle.classList.toggle('expanded', agentLogOpen);
+  toggle.setAttribute('aria-expanded', String(agentLogOpen));
   document.getElementById('agentLogBody').classList.toggle('open', agentLogOpen);
   if (agentLogOpen && agentLogTaskId) {
     loadAgentLog(agentLogTaskId);
@@ -4898,7 +4905,9 @@ function stopAgentLogRefresh() {
 
 function toggleHandoff() {
   handoffOpen = !handoffOpen;
-  document.getElementById('handoffToggle').classList.toggle('expanded', handoffOpen);
+  const toggle = document.getElementById('handoffToggle');
+  toggle.classList.toggle('expanded', handoffOpen);
+  toggle.setAttribute('aria-expanded', String(handoffOpen));
   document.getElementById('handoffBody').classList.toggle('open', handoffOpen);
 }
 
@@ -5325,8 +5334,10 @@ function relativeTime(isoStr) {
 
 async function toggleNotifDropdown() {
   const dropdown = document.getElementById('notifDropdown');
+  const btn = document.getElementById('notifBtn');
   const isOpen = dropdown.classList.contains('open');
   dropdown.classList.toggle('open', !isOpen);
+  btn.setAttribute('aria-expanded', String(!isOpen));
   // Notifications are only marked read when the user clicks an item
   // or explicitly clicks "Mark all read" — not on dropdown open.
 }
@@ -5357,6 +5368,7 @@ document.addEventListener('click', e => {
   const wrapper = document.querySelector('.notif-wrapper');
   if (wrapper && !wrapper.contains(e.target)) {
     document.getElementById('notifDropdown').classList.remove('open');
+    document.getElementById('notifBtn').setAttribute('aria-expanded', 'false');
   }
 });
 
