@@ -3420,6 +3420,13 @@ kbd {
             <option value="medium" selected>Medium</option>
             <option value="low">Low</option>
           </select>
+          <select id="projectTemplateColumn" style="flex:0 0 140px;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-family:inherit;font-size:12px;outline:none;">
+            <option value="idea">Idea</option>
+            <option value="backlog" selected>Backlog</option>
+            <option value="in-progress">In Progress</option>
+            <option value="in-review">In Review</option>
+            <option value="done">Done</option>
+          </select>
         </div>
         <div style="display:flex;justify-content:flex-end;gap:8px;">
           <button type="button" id="templateSaveBtn" style="padding:8px 12px;border-radius:8px;border:1px solid var(--accent);background:var(--accent-glow);color:#a29bfe;font-family:inherit;font-size:12px;font-weight:600;cursor:pointer;">Save Template</button>
@@ -4545,6 +4552,7 @@ function applyTemplate() {
   initTagEditor(tmpl.defaultTags || []);
   document.getElementById('fAssignee').value = tmpl.defaultAssignee || 'Mike';
   document.getElementById('fPriority').value = tmpl.defaultPriority || 'medium';
+  document.getElementById('fColumn').value = tmpl.defaultColumn || 'backlog';
 }
 
 // Modal
@@ -5983,6 +5991,7 @@ function resetProjectTemplateForm() {
   document.getElementById('projectTemplateTags').value = '';
   document.getElementById('projectTemplateAssignee').value = 'Mike';
   document.getElementById('projectTemplatePriority').value = 'medium';
+  document.getElementById('projectTemplateColumn').value = 'backlog';
 }
 
 function renderProjectTemplateList() {
@@ -6056,6 +6065,7 @@ function editProjectTemplate(id) {
   document.getElementById('projectTemplateTags').value = (tmpl.defaultTags || []).join(', ');
   document.getElementById('projectTemplateAssignee').value = tmpl.defaultAssignee || 'Mike';
   document.getElementById('projectTemplatePriority').value = tmpl.defaultPriority || 'medium';
+  document.getElementById('projectTemplateColumn').value = tmpl.defaultColumn || 'backlog';
   document.getElementById('projectTemplateName').focus();
 }
 
@@ -6080,6 +6090,7 @@ async function saveProjectTemplate() {
     defaultTags: getProjectTemplateTagsFromInput(),
     defaultAssignee: document.getElementById('projectTemplateAssignee').value.trim() || 'Mike',
     defaultPriority: document.getElementById('projectTemplatePriority').value || 'medium',
+    defaultColumn: document.getElementById('projectTemplateColumn').value || 'backlog',
   };
 
   try {

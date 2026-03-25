@@ -662,12 +662,12 @@ app.post('/api/projects', (req, res) => {
     ).run(project.id, project.name, project.color, project.emoji, project.createdAt);
     // Create default agent-task template for new project
     db.prepare(
-      'INSERT INTO templates (id, projectId, name, defaultDescription, defaultTags, defaultAssignee, defaultPriority, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+      'INSERT INTO templates (id, projectId, name, defaultDescription, defaultTags, defaultAssignee, defaultPriority, defaultColumn, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
     ).run(
       tmplId, project.id, 'agent-task',
       newProjDefaultDesc,
       JSON.stringify(['agent', 'automation']),
-      'ClawDawg', 'medium', new Date().toISOString()
+      'ClawDawg', 'medium', 'backlog', new Date().toISOString()
     );
   });
   createProject();
@@ -920,7 +920,8 @@ app.get('/api/templates', (req, res) => {
     res.json(rows.map(r => ({
       ...r,
       defaultDescription: resolveTemplatePlaceholders(r.defaultDescription),
-      defaultTags: JSON.parse(r.defaultTags)
+      defaultTags: JSON.parse(r.defaultTags),
+      defaultColumn: r.defaultColumn || 'backlog',
     })));
   } catch (err) {
     console.error(err);
@@ -935,6 +936,14 @@ function buildTemplatePayload(body = {}, existing = {}) {
 
   if (!VALID_PRIORITIES.includes(defaultPriority)) {
     return { error: `Invalid priority. Must be one of: ${VALID_PRIORITIES.join(', ')}` };
+  }
+
+  const defaultColumn = body.defaultColumn !== undefined
+    ? body.defaultColumn
+    : (existing.defaultColumn || 'backlog');
+
+  if (!VALID_COLUMNS.includes(defaultColumn)) {
+    return { error: `Invalid defaultColumn. Must be one of: ${VALID_COLUMNS.join(', ')}` };
   }
 
   let defaultTags = body.defaultTags !== undefined
@@ -959,6 +968,7 @@ function buildTemplatePayload(body = {}, existing = {}) {
     defaultTags: defaultTags.map(tag => String(tag).trim()).filter(Boolean),
     defaultAssignee: body.defaultAssignee !== undefined ? String(body.defaultAssignee).trim() || 'Mike' : (existing.defaultAssignee || 'Mike'),
     defaultPriority,
+    defaultColumn,
   };
 }
 
@@ -975,8 +985,8 @@ app.post('/api/templates', (req, res) => {
       createdAt: new Date().toISOString(),
     };
     db.prepare(
-      'INSERT INTO templates (id, projectId, name, defaultDescription, defaultTags, defaultAssignee, defaultPriority, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
-    ).run(tmpl.id, tmpl.projectId, tmpl.name, tmpl.defaultDescription, JSON.stringify(tmpl.defaultTags), tmpl.defaultAssignee, tmpl.defaultPriority, tmpl.createdAt);
+      'INSERT INTO templates (id, projectId, name, defaultDescription, defaultTags, defaultAssignee, defaultPriority, defaultColumn, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+    ).run(tmpl.id, tmpl.projectId, tmpl.name, tmpl.defaultDescription, JSON.stringify(tmpl.defaultTags), tmpl.defaultAssignee, tmpl.defaultPriority, tmpl.defaultColumn, tmpl.createdAt);
     res.status(201).json({ ...tmpl });
   } catch (err) {
     console.error(err);
@@ -997,8 +1007,8 @@ app.put('/api/templates/:id', (req, res) => {
     if (payload.error) return res.status(400).json({ error: payload.error });
 
     db.prepare(
-      'UPDATE templates SET name = ?, defaultDescription = ?, defaultTags = ?, defaultAssignee = ?, defaultPriority = ? WHERE id = ?'
-    ).run(payload.name, payload.defaultDescription, JSON.stringify(payload.defaultTags), payload.defaultAssignee, payload.defaultPriority, req.params.id);
+      'UPDATE templates SET name = ?, defaultDescription = ?, defaultTags = ?, defaultAssignee = ?, defaultPriority = ?, defaultColumn = ? WHERE id = ?'
+    ).run(payload.name, payload.defaultDescription, JSON.stringify(payload.defaultTags), payload.defaultAssignee, payload.defaultPriority, payload.defaultColumn, req.params.id);
 
     res.json({
       id: existing.id,
@@ -1319,6 +1329,15 @@ app.post('/api/tasks', (req, res) => {
       }
     }
 
+    // If a templateId is provided and no explicit column is set, use the template's defaultColumn
+    let resolvedColumn = req.body.column || 'backlog';
+    if (req.body.templateId && !req.body.column) {
+      const template = db.prepare('SELECT defaultColumn FROM templates WHERE id = ?').get(req.body.templateId);
+      if (template && template.defaultColumn) {
+        resolvedColumn = template.defaultColumn;
+      }
+    }
+
     const task = {
       id: Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
       title: req.body.title || 'Untitled',
@@ -1326,7 +1345,7 @@ app.post('/api/tasks', (req, res) => {
       assignee: req.body.assignee || 'Mike',
       priority: req.body.priority || 'medium',
       tags: req.body.tags || [],
-      column: req.body.column || 'backlog',
+      column: resolvedColumn,
       createdAt: new Date().toISOString(),
       recurring: req.body.recurring || null,
       subtasks: req.body.subtasks || null,
@@ -2656,12 +2675,12 @@ app.get('/api/stats', (req, res) => {
     if (!existing) {
       const tmplId = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
       db.prepare(
-        'INSERT INTO templates (id, projectId, name, defaultDescription, defaultTags, defaultAssignee, defaultPriority, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+        'INSERT INTO templates (id, projectId, name, defaultDescription, defaultTags, defaultAssignee, defaultPriority, defaultColumn, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
       ).run(
         tmplId, project.id, 'agent-task',
         DEFAULT_DESCRIPTION,
         JSON.stringify(['agent', 'automation']),
-        'ClawDawg', 'medium', new Date().toISOString()
+        'ClawDawg', 'medium', 'backlog', new Date().toISOString()
       );
       console.log(`Seeded default agent-task template for project: ${project.id}`);
     }

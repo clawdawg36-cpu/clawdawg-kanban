@@ -80,7 +80,7 @@ const TASKS_SCHEMA_V1_COLUMNS = [
   'agentSessionId',
   'agentStartedAt',
 ];
-const LATEST_SCHEMA_VERSION = 3;
+const LATEST_SCHEMA_VERSION = 4;
 
 // Open the database with error handling — better-sqlite3 throws synchronously
 // on corruption or permission errors, so we catch and exit gracefully.
@@ -245,6 +245,16 @@ const migrations = [
         db.exec("CREATE INDEX IF NOT EXISTS idx_notifications_project_id ON notifications(project_id)");
         db.exec("UPDATE notifications SET project_id = (SELECT projectId FROM tasks WHERE tasks.id = notifications.task_id) WHERE project_id IS NULL");
         console.log('Migrated: added project_id column to notifications table');
+      }
+    },
+  },
+  {
+    version: 4,
+    apply() {
+      const templateCols = getTableColumns('templates');
+      if (!templateCols.includes('defaultColumn')) {
+        db.exec("ALTER TABLE templates ADD COLUMN defaultColumn TEXT DEFAULT 'backlog'");
+        console.log('Migrated: added defaultColumn column to templates table');
       }
     },
   },
