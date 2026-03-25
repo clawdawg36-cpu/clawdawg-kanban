@@ -6491,34 +6491,49 @@ document.addEventListener('keydown', e => {
 });
 
 // ─── Mobile Swipe Gestures ────────────────────────────────────────────────────
+// Dead zone: ignore touches starting within 24px of the left edge to avoid
+// conflicting with Android's system back gesture (which occupies ~20-25px).
+// Also requires a minimum swipe velocity to avoid slow drags registering.
 (function() {
-  let touchStartX = 0;
-  let touchStartY = 0;
+  var EDGE_DEAD_ZONE = 24; // px — Android back gesture zone
+  var SWIPE_ZONE_MAX = 60; // px — max start position for swipe-to-open
+  var MIN_VELOCITY = 0.3;  // px/ms — minimum swipe speed
+  var touchStartX = 0;
+  var touchStartY = 0;
+  var touchStartTime = 0;
 
-  document.addEventListener('touchstart', e => {
+  document.addEventListener('touchstart', function(e) {
     touchStartX = e.touches[0].clientX;
     touchStartY = e.touches[0].clientY;
+    touchStartTime = Date.now();
   }, { passive: true });
 
-  document.addEventListener('touchend', e => {
+  document.addEventListener('touchend', function(e) {
     if (!isMobile()) return;
-    const touchEndX = e.changedTouches[0].clientX;
-    const touchEndY = e.changedTouches[0].clientY;
-    const dx = touchEndX - touchStartX;
-    const dy = touchEndY - touchStartY;
+    var touchEndX = e.changedTouches[0].clientX;
+    var touchEndY = e.changedTouches[0].clientY;
+    var dx = touchEndX - touchStartX;
+    var dy = touchEndY - touchStartY;
 
     // Only horizontal swipes (ignore vertical scroll gestures)
     if (Math.abs(dx) < 50 || Math.abs(dy) > Math.abs(dx)) return;
 
-    const sidebar = document.getElementById('projectSidebar');
-    const isSidebarOpen = sidebar.classList.contains('mobile-open');
+    // Velocity check — reject slow drags
+    var duration = Date.now() - touchStartTime;
+    if (duration > 0 && (Math.abs(dx) / duration) < MIN_VELOCITY) return;
+
+    var sidebar = document.getElementById('projectSidebar');
+    var isSidebarOpen = sidebar.classList.contains('mobile-open');
 
     if (dx > 0 && !isSidebarOpen) {
-      // Swipe right — open sidebar (only if starting from left edge, within 40px)
-      if (touchStartX < 40) openMobileSidebar();
-    } else if (dx < 0 && isSidebarOpen) {
-      // Swipe left — close sidebar
-      closeMobileSidebar();
+      // Swipe right — open sidebar
+      // Must start past the Android back-gesture dead zone but within the swipe zone
+      if (touchStartX >= EDGE_DEAD_ZONE && touchStartX < SWIPE_ZONE_MAX) {
+        openMobileSidebar();
+      }
+    } else if (dx < 0) {
+      // Swipe left — close sidebar (from anywhere, if sidebar is open)
+      if (isSidebarOpen) closeMobileSidebar();
     }
   }, { passive: true });
 })();
