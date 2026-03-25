@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
 <title>Kanban — Mike & ClawDawg</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -1852,6 +1852,7 @@ input[type="date"] {
   body {
     overflow-x: hidden;
     -webkit-text-size-adjust: 100%;
+    touch-action: manipulation;
   }
 
   /* Header */
@@ -2161,6 +2162,26 @@ input[type="date"] {
   /* Disable drag cursor on mobile */
   .card {
     cursor: default;
+  }
+
+  /* Prevent iOS Safari auto-zoom on focus (font-size < 16px triggers zoom) */
+  .comment-input {
+    font-size: 16px;
+    min-height: 44px;
+  }
+
+  .comment-author-select {
+    font-size: 16px;
+    min-height: 44px;
+  }
+
+  .search-input {
+    font-size: 16px;
+  }
+
+  .search-select {
+    font-size: 16px;
+    min-height: 44px;
   }
 }
 
