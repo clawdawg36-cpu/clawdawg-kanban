@@ -3303,12 +3303,12 @@ kbd {
     </div>
     <div class="field">
       <label>Title</label>
-      <input type="text" id="fTitle" placeholder="What needs to be done?" required aria-required="true">
+      <input type="text" id="fTitle" placeholder="What needs to be done?" required aria-required="true" autocapitalize="sentences" autocorrect="on">
       <span class="field-error-message" id="fTitleError" role="alert">Title is required.</span>
     </div>
     <div class="field">
       <label>Description</label>
-      <textarea id="fDesc" placeholder="Add details..."></textarea>
+      <textarea id="fDesc" placeholder="Add details..." autocapitalize="sentences" autocorrect="on"></textarea>
     </div>
     <div class="field-row">
       <div class="field">
@@ -3379,7 +3379,7 @@ kbd {
       <label>Checklist</label>
       <div class="checklist-items" id="checklistItems"></div>
       <div class="checklist-add-row">
-        <input type="text" id="checklistInput" placeholder="Add checklist item...">
+        <input type="text" id="checklistInput" placeholder="Add checklist item..." autocapitalize="sentences" autocorrect="on">
         <button class="checklist-add-btn" id="checklistAddBtn">Add</button>
       </div>
     </div>
@@ -3425,7 +3425,7 @@ kbd {
         </div>
         <div class="comment-form">
           <textarea class="comment-input" id="commentInput" placeholder="Add a comment..." rows="1"
-            ></textarea>
+            autocapitalize="sentences" autocorrect="on"></textarea>
           <select class="comment-author-select" id="commentAuthor">
             <option value="Mike">Mike</option>
             <option value="ClawDawg">ClawDawg</option>
