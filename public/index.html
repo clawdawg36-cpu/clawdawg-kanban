@@ -3362,13 +3362,13 @@ kbd {
     </div>
     <div class="field">
       <label>Color</label>
-      <div class="color-swatches" id="colorSwatches">
-        <div class="color-swatch selected" data-color="#6c5ce7" style="background:#6c5ce7"></div>
-        <div class="color-swatch" data-color="#00b894" style="background:#00b894"></div>
-        <div class="color-swatch" data-color="#e17055" style="background:#e17055"></div>
-        <div class="color-swatch" data-color="#0984e3" style="background:#0984e3"></div>
-        <div class="color-swatch" data-color="#fdcb6e" style="background:#fdcb6e"></div>
-        <div class="color-swatch" data-color="#a29bfe" style="background:#a29bfe"></div>
+      <div class="color-swatches" id="colorSwatches" role="radiogroup" aria-label="Project color">
+        <div class="color-swatch selected" data-color="#6c5ce7" style="background:#6c5ce7" role="radio" aria-label="Purple" aria-checked="true" tabindex="0"></div>
+        <div class="color-swatch" data-color="#00b894" style="background:#00b894" role="radio" aria-label="Green" aria-checked="false" tabindex="0"></div>
+        <div class="color-swatch" data-color="#e17055" style="background:#e17055" role="radio" aria-label="Orange" aria-checked="false" tabindex="0"></div>
+        <div class="color-swatch" data-color="#0984e3" style="background:#0984e3" role="radio" aria-label="Blue" aria-checked="false" tabindex="0"></div>
+        <div class="color-swatch" data-color="#fdcb6e" style="background:#fdcb6e" role="radio" aria-label="Yellow" aria-checked="false" tabindex="0"></div>
+        <div class="color-swatch" data-color="#a29bfe" style="background:#a29bfe" role="radio" aria-label="Lavender" aria-checked="false" tabindex="0"></div>
       </div>
     </div>
     <div class="field">
@@ -5912,8 +5912,12 @@ let selectedProjectEmoji = '📋';
 
 document.querySelectorAll('.color-swatch').forEach(swatch => {
   swatch.addEventListener('click', () => {
-    document.querySelectorAll('.color-swatch').forEach(s => s.classList.remove('selected'));
+    document.querySelectorAll('.color-swatch').forEach(s => {
+      s.classList.remove('selected');
+      s.setAttribute('aria-checked', 'false');
+    });
     swatch.classList.add('selected');
+    swatch.setAttribute('aria-checked', 'true');
     selectedProjectColor = swatch.dataset.color;
   });
 });
@@ -5935,7 +5939,9 @@ function openProjectModal(project) {
   // Reset and set color
   selectedProjectColor = project ? project.color : '#6c5ce7';
   document.querySelectorAll('.color-swatch').forEach(s => {
-    s.classList.toggle('selected', s.dataset.color === selectedProjectColor);
+    const isSelected = s.dataset.color === selectedProjectColor;
+    s.classList.toggle('selected', isSelected);
+    s.setAttribute('aria-checked', String(isSelected));
   });
 
   // Reset and set emoji
