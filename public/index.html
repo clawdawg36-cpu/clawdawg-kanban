@@ -1908,6 +1908,15 @@ input[type="date"] {
   color: #a29bfe;
 }
 
+/* Mobile: open tag autocomplete ABOVE input to avoid virtual keyboard */
+@media (max-width: 768px) {
+  .tag-autocomplete-list {
+    top: auto;
+    bottom: calc(100% + 4px);
+    max-height: 100px;
+  }
+}
+
 /* ===== MOBILE STYLES ===== */
 @media (max-width: 768px) {
   body {
