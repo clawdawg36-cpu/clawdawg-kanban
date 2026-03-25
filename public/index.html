@@ -5237,7 +5237,7 @@ async function uploadAttachments() {
   const taskId = document.getElementById('taskId').value;
   if (!taskId) return;
   const fileInput = document.getElementById('attachmentFile');
-  if (!fileInput.files.length) { alert('Please select a file to upload.'); return; }
+  if (!fileInput.files.length) { showToast('Please select a file to upload.', 'error'); return; }
 
   const btn = document.querySelector('.attachment-upload-btn');
   btn.textContent = 'Uploading…';
