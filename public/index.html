@@ -497,6 +497,24 @@ input[type="date"] {
   box-shadow: 0 0 0 3px var(--accent-glow);
 }
 
+/* Field error state */
+.field-error {
+  border-color: var(--red) !important;
+  box-shadow: 0 0 0 3px rgba(225, 112, 85, 0.25) !important;
+}
+
+.field-error-message {
+  display: none;
+  font-size: 12px;
+  color: var(--red);
+  margin-top: 4px;
+  font-weight: 500;
+}
+
+.field-error-message.visible {
+  display: block;
+}
+
 .field textarea { resize: vertical; min-height: 72px; }
 
 .field-row {
@@ -3146,7 +3164,8 @@ kbd {
     </div>
     <div class="field">
       <label>Title</label>
-      <input type="text" id="fTitle" placeholder="What needs to be done?">
+      <input type="text" id="fTitle" placeholder="What needs to be done?" required aria-required="true">
+      <span class="field-error-message" id="fTitleError" role="alert">Title is required.</span>
     </div>
     <div class="field">
       <label>Description</label>
@@ -5079,7 +5098,15 @@ async function saveTask() {
     subtasks: currentChecklist.length > 0 ? currentChecklist : null,
     wave: document.getElementById('fWave').value !== '' ? parseInt(document.getElementById('fWave').value) : null,
   };
-  if (!data.title) { document.getElementById('fTitle').focus(); return; }
+  if (!data.title) {
+    const titleInput = document.getElementById('fTitle');
+    const titleError = document.getElementById('fTitleError');
+    titleInput.classList.add('field-error');
+    titleInput.setAttribute('aria-invalid', 'true');
+    titleError.classList.add('visible');
+    titleInput.focus();
+    return;
+  }
 
   clearModalError();
   const saveBtn = document.getElementById('btnSaveTask');
@@ -6362,6 +6389,15 @@ document.addEventListener('DOMContentLoaded', function() {
   document.getElementById('fTemplate').addEventListener('change', applyTemplate);
   document.getElementById('tagChipEditor').addEventListener('click', function() {
     document.getElementById('tagChipInput').focus();
+  });
+  document.getElementById('fTitle').addEventListener('input', function() {
+    const titleInput = document.getElementById('fTitle');
+    const titleError = document.getElementById('fTitleError');
+    if (titleInput.classList.contains('field-error')) {
+      titleInput.classList.remove('field-error');
+      titleInput.removeAttribute('aria-invalid');
+      titleError.classList.remove('visible');
+    }
   });
   document.getElementById('checklistInput').addEventListener('keydown', function(e) {
     if (e.key === 'Enter') { e.preventDefault(); addChecklistItem(); }
