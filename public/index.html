@@ -4614,6 +4614,11 @@ function releaseFocus(container) {
 function openModal(task) {
   document.getElementById('modal').classList.add('open');
   // Lock body scroll to prevent background board from scrolling
+  // Compensate for scrollbar disappearance to prevent layout shift
+  var scrollbarWidth = window.innerWidth - document.documentElement.clientWidth;
+  if (scrollbarWidth > 0) {
+    document.body.style.paddingRight = scrollbarWidth + 'px';
+  }
   document.body.style.overflow = 'hidden';
   document.body.style.touchAction = 'none';
   clearModalError();
@@ -5017,9 +5022,10 @@ function closeModal() {
   const modalEl = document.querySelector('#modal .modal');
   if (modalEl) releaseFocus(modalEl);
   document.getElementById('modal').classList.remove('open');
-  // Restore body scroll
+  // Restore body scroll and remove scrollbar compensation
   document.body.style.overflow = '';
   document.body.style.touchAction = '';
+  document.body.style.paddingRight = '';
 }
 
 function editTask(id) {
