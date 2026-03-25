@@ -1384,6 +1384,45 @@ app.put('/api/tasks/:id', (req, res) => {
       'UPDATE tasks SET title = ?, description = ?, assignee = ?, priority = ?, tags = ?, "column" = ?, dueDate = ?, recurring = ?, subtasks = ?, projectId = ?, blockedBy = ?, wave = ?, agentSessionId = ?, agentStartedAt = ? WHERE id = ?'
     ).run(updated.title, updated.description, updated.assignee, updated.priority, JSON.stringify(updated.tags), updated.column, updated.dueDate || null, updated.recurring || null, updated.subtasks ? JSON.stringify(updated.subtasks) : null, updated.projectId || 'default', JSON.stringify(updated.blockedBy), updated.wave, updated.agentSessionId, updated.agentStartedAt, updated.id);
 
+    // Log field-change diffs for auditable fields
+    const DIFF_FIELDS = ['title', 'description', 'assignee', 'priority', 'dueDate', 'recurring', 'projectId', 'wave'];
+    const diffNow = new Date().toISOString();
+    for (const field of DIFF_FIELDS) {
+      // Only diff fields the client actually sent
+      if (clientUpdate[field] === undefined) continue;
+      const oldVal = existing[field];
+      const newVal = updated[field];
+      // Normalise nullish values for comparison
+      const oldNorm = oldVal == null ? null : oldVal;
+      const newNorm = newVal == null ? null : newVal;
+      if (oldNorm === newNorm) continue;
+      const displayOld = oldNorm == null ? '(none)' : String(oldNorm);
+      const displayNew = newNorm == null ? '(none)' : String(newNorm);
+      const diffActId = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+      db.prepare(
+        'INSERT INTO card_activity (id, taskId, type, content, author, createdAt) VALUES (?, ?, ?, ?, ?, ?)'
+      ).run(diffActId, existing.id, 'field_change', `${field}: ${displayOld} → ${displayNew}`, updated.assignee || 'System', diffNow);
+    }
+    // Diff JSON array fields: tags, blockedBy
+    const JSON_DIFF_FIELDS = [
+      { field: 'tags', oldRaw: existing.tags },
+      { field: 'blockedBy', oldRaw: existing.blockedBy }
+    ];
+    for (const { field, oldRaw } of JSON_DIFF_FIELDS) {
+      if (clientUpdate[field] === undefined) continue;
+      const oldArr = oldRaw ? JSON.parse(oldRaw) : [];
+      const newArr = updated[field] || [];
+      const oldSorted = JSON.stringify([...oldArr].sort());
+      const newSorted = JSON.stringify([...newArr].sort());
+      if (oldSorted === newSorted) continue;
+      const displayOld = oldArr.length ? oldArr.join(', ') : '(none)';
+      const displayNew = newArr.length ? newArr.join(', ') : '(none)';
+      const diffActId = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+      db.prepare(
+        'INSERT INTO card_activity (id, taskId, type, content, author, createdAt) VALUES (?, ?, ?, ?, ?, ?)'
+      ).run(diffActId, existing.id, 'field_change', `${field}: ${displayOld} → ${displayNew}`, updated.assignee || 'System', diffNow);
+    }
+
     // Auto-log column changes
     if (req.body.column && req.body.column !== existing.column) {
       const now = new Date().toISOString();
