@@ -5891,7 +5891,12 @@ function openProjectModal(project) {
   document.getElementById('agentTimeout').value = cfg.timeoutSeconds || '';
 
   modal.classList.add('open');
-  setTimeout(() => document.getElementById('pName').focus(), 100);
+
+  // Activate focus trap on the project modal content
+  setTimeout(() => {
+    const container = document.querySelector('.project-modal-content');
+    if (container) trapFocus(container);
+  }, 100);
 
   const projectId = project ? project.id : null;
   loadProjectTemplates(projectId);
@@ -5901,6 +5906,8 @@ function openProjectModal(project) {
 }
 
 function closeProjectModal() {
+  const container = document.querySelector('.project-modal-content');
+  if (container) releaseFocus(container);
   document.getElementById('projectModal').classList.remove('open');
 }
 
@@ -6184,10 +6191,16 @@ function openQuickSwitcher() {
   input.value = '';
   qsFocusIndex = 0;
   renderQuickSwitcher('');
-  setTimeout(() => input.focus(), 50);
+  // Activate focus trap on the quick switcher panel
+  setTimeout(() => {
+    const panel = document.querySelector('.qs-panel');
+    if (panel) trapFocus(panel);
+  }, 50);
 }
 
 function closeQuickSwitcher() {
+  const panel = document.querySelector('.qs-panel');
+  if (panel) releaseFocus(panel);
   document.getElementById('quickSwitcher').classList.remove('open');
 }
 
