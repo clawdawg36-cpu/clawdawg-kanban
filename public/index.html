@@ -2687,6 +2687,9 @@ body.select-mode .card-checkbox-wrap {
 body.select-mode .card-actions {
   display: none !important;
 }
+body.select-mode .fab {
+  display: none !important;
+}
 body.select-mode .card {
   cursor: pointer;
   user-select: none;
@@ -3992,7 +3995,12 @@ function updateBulkToolbar() {
   const countEl = document.getElementById('bulkCount');
   const n = selectedTaskIds.size;
   countEl.textContent = `${n} selected`;
-  toolbar.classList.toggle('visible', n > 0);
+  const isVisible = n > 0;
+  toolbar.classList.toggle('visible', isVisible);
+  toolbar.setAttribute('aria-hidden', String(!isVisible));
+  // Hide FAB when bulk toolbar is visible, show when not
+  const fab = document.getElementById('fabBtn');
+  if (fab) fab.style.display = isVisible ? 'none' : '';
   // Reset the move dropdown
   document.getElementById('bulkMoveSelect').value = '';
 }
@@ -6550,7 +6558,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
 <!-- Confirmation Modal (for destructive project deletes) -->
 <!-- Bulk Action Toolbar -->
-<div id="bulkToolbar" role="toolbar" aria-label="Bulk actions">
+<div id="bulkToolbar" role="toolbar" aria-label="Bulk actions" aria-hidden="true">
   <span class="bulk-count" id="bulkCount">0 selected</span>
   <div class="bulk-divider"></div>
   <span class="bulk-action-label">Move to</span>
