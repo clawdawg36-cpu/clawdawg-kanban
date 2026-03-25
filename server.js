@@ -582,6 +582,68 @@ app.get('/api/projects/:id/handoffs', (req, res) => {
   }
 });
 
+// GET /api/projects/:id/timeline — burndown/velocity time-series endpoint
+// Returns daily counts of tasks completed and created for the given project.
+// Query params: ?days=30 (default 30, max 365) — how many days back to look.
+// Response: { items: [{ date: "2026-03-24", completed: 5, created: 3 }, ...], total_completed: N, total_created: N }
+app.get('/api/projects/:id/timeline', (req, res) => {
+  try {
+    const project = db.prepare('SELECT id FROM projects WHERE id = ?').get(req.params.id);
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+
+    const days = Math.max(1, Math.min(365, parseInt(req.query.days, 10) || 30));
+    const sinceDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+    const sinceIso = sinceDate.toISOString();
+
+    // Get daily completed counts: card_activity 'move' events ending in '→ Done', grouped by date
+    const completedRows = db.prepare(`
+      SELECT DATE(a.createdAt) as date, COUNT(*) as completed
+      FROM card_activity a
+      INNER JOIN tasks t ON t.id = a.taskId
+      WHERE t.projectId = ?
+        AND a.type = 'move'
+        AND a.content LIKE '%→ Done%'
+        AND a.createdAt >= ?
+      GROUP BY DATE(a.createdAt)
+      ORDER BY date ASC
+    `).all(req.params.id, sinceIso);
+
+    // Get daily created counts: card_activity 'created' events, grouped by date
+    const createdRows = db.prepare(`
+      SELECT DATE(a.createdAt) as date, COUNT(*) as created
+      FROM card_activity a
+      INNER JOIN tasks t ON t.id = a.taskId
+      WHERE t.projectId = ?
+        AND a.type = 'created'
+        AND a.createdAt >= ?
+      GROUP BY DATE(a.createdAt)
+      ORDER BY date ASC
+    `).all(req.params.id, sinceIso);
+
+    // Merge into a single date-keyed map
+    const dateMap = new Map();
+    for (const row of completedRows) {
+      if (!dateMap.has(row.date)) dateMap.set(row.date, { date: row.date, completed: 0, created: 0 });
+      dateMap.get(row.date).completed = row.completed;
+    }
+    for (const row of createdRows) {
+      if (!dateMap.has(row.date)) dateMap.set(row.date, { date: row.date, completed: 0, created: 0 });
+      dateMap.get(row.date).created = row.created;
+    }
+
+    // Sort by date ascending
+    const items = Array.from(dateMap.values()).sort((a, b) => a.date.localeCompare(b.date));
+
+    const total_completed = items.reduce((sum, i) => sum + i.completed, 0);
+    const total_created = items.reduce((sum, i) => sum + i.created, 0);
+
+    res.json({ items, total_completed, total_created });
+  } catch (err) {
+    console.error('GET /api/projects/:id/timeline error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // POST /api/projects — create a project
 app.post('/api/projects', (req, res) => {
   try {
