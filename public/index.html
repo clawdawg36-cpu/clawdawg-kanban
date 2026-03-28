@@ -26,6 +26,92 @@
   --transition: 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
+/* Light theme overrides */
+[data-theme="light"] {
+  --bg: #f5f6fa;
+  --surface: #ffffff;
+  --surface2: #eef0f6;
+  --border: #d9dce8;
+  --text: #1a1d27;
+  --text-dim: #5f6478;
+  --accent: #6c5ce7;
+  --accent-glow: rgba(108, 92, 231, 0.15);
+  --green: #00a884;
+  --orange: #e2950e;
+  --red: #d63031;
+  --blue: #0984e3;
+}
+
+/* Light theme specific overrides */
+[data-theme="light"] .card {
+  box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+}
+[data-theme="light"] .card:hover {
+  box-shadow: 0 4px 16px rgba(0,0,0,0.1);
+}
+[data-theme="light"] .modal {
+  box-shadow: 0 20px 60px rgba(0,0,0,0.15);
+}
+[data-theme="light"] .logo h1 {
+  background: linear-gradient(135deg, #1a1d27, #6c5ce7);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+}
+[data-theme="light"] .modal h2 {
+  background: linear-gradient(135deg, #1a1d27, #6c5ce7);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+}
+[data-theme="light"] header {
+  background: linear-gradient(180deg, rgba(108,92,231,0.04) 0%, transparent 100%);
+}
+[data-theme="light"] .notif-badge {
+  border-color: var(--bg);
+}
+[data-theme="light"] .toast {
+  box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+}
+[data-theme="light"] input[type="date"] {
+  color-scheme: light;
+}
+[data-theme="light"] .skeleton-card,
+[data-theme="light"] .skeleton-col-header {
+  opacity: 0.6;
+}
+[data-theme="light"] .highlight {
+  background: rgba(108, 92, 231, 0.2);
+  color: #4a3fad;
+}
+[data-theme="light"] .card.idea-card {
+  background: rgba(162, 155, 254, 0.08);
+}
+
+/* Theme toggle button */
+.theme-toggle-btn {
+  width: 36px; height: 36px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-dim);
+  font-size: 18px;
+  cursor: pointer;
+  display: grid; place-items: center;
+  transition: var(--transition);
+  flex-shrink: 0;
+  line-height: 1;
+}
+
+.theme-toggle-btn:hover {
+  border-color: var(--accent);
+  color: var(--text);
+  background: var(--surface2);
+}
+
+@media (max-width: 768px) {
+  .theme-toggle-btn {
+    width: 44px;
+    height: 44px;
+  }
+}
+
 body {
   font-family: 'Inter', -apple-system, sans-serif;
   background: var(--bg);
@@ -3205,6 +3291,13 @@ kbd {
 </style>
 </head>
 <body>
+<script>
+// Apply saved theme immediately to prevent flash of wrong theme
+(function() {
+  var theme = localStorage.getItem('kanban-theme') || 'dark';
+  document.documentElement.setAttribute('data-theme', theme);
+})();
+</script>
 
 <!-- Project Sidebar -->
 <nav id="projectSidebar" class="sidebar-collapsed">
@@ -3228,6 +3321,7 @@ kbd {
     <h1 id="headerTitle">Kanban Board</h1>
   </div>
   <div class="header-actions">
+    <button class="theme-toggle-btn" id="themeToggleBtn" title="Toggle light/dark theme" aria-label="Toggle light/dark theme">🌙</button>
     <div class="notif-wrapper">
       <button class="notif-btn" id="notifBtn" title="Notifications" aria-haspopup="true" aria-expanded="false" aria-label="Notifications">
         🔔
@@ -6690,6 +6784,31 @@ connectSSE();
 // EVENT LISTENERS — All handlers registered via addEventListener (CSP-safe)
 // ═══════════════════════════════════════════════════════════════════════════════
 document.addEventListener('DOMContentLoaded', function() {
+  // ─── Theme Toggle ────────────────────────────────────────────────────────
+  (function initTheme() {
+    const saved = localStorage.getItem('kanban-theme');
+    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    const theme = saved || (prefersDark ? 'dark' : 'dark'); // default dark
+    applyTheme(theme);
+  })();
+
+  function applyTheme(theme) {
+    document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem('kanban-theme', theme);
+    const btn = document.getElementById('themeToggleBtn');
+    if (btn) {
+      btn.textContent = theme === 'dark' ? '☀️' : '🌙';
+      btn.title = theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode';
+    }
+  }
+
+  function toggleTheme() {
+    const current = document.documentElement.getAttribute('data-theme') || 'dark';
+    applyTheme(current === 'dark' ? 'light' : 'dark');
+  }
+
+  document.getElementById('themeToggleBtn').addEventListener('click', toggleTheme);
+
   // ─── Static element listeners ─────────────────────────────────────────────
   document.getElementById('sidebarToggle').addEventListener('click', toggleSidebar);
   document.getElementById('sidebarNewBtn').addEventListener('click', function() { openProjectModal(); });
