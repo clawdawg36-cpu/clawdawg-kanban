@@ -168,6 +168,7 @@ function truncateSpawnTaskDescription(description) {
 
 // ─── Security headers ─────────────────────────────────────────────────────────
 app.use(helmet({
+  hsts: true,                      // enable HSTS — Tailscale provides HTTPS
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
@@ -175,14 +176,15 @@ app.use(helmet({
       scriptSrcAttr: ["'none'"],                       // block inline handlers — all migrated to addEventListener
       styleSrc:  ["'self'", "'unsafe-inline'"],       // allow inline styles
       imgSrc:    ["'self'", "data:", "blob:"],
-      connectSrc: ["'self'"],
+      connectSrc: ["'self'", "http://192.168.68.67:3456", "http://100.106.219.115:3456"],
+      upgradeInsecureRequests: null,
     },
   },
 }));
 
 // Restrict cross-origin requests to localhost origins only
 app.use(cors({
-  origin: [/^http:\/\/localhost(:\d+)?$/, /^http:\/\/127\.0\.0\.1(:\d+)?$/],
+  origin: [/^http:\/\/localhost(:\d+)?$/, /^http:\/\/127\.0\.0\.1(:\d+)?$/, /^http:\/\/192\.168\.\d+\.\d+(:\d+)?$/, /^https?:\/\/100\.\d+\.\d+\.\d+(:\d+)?$/],
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
   allowedHeaders: ['Content-Type', 'Authorization'],
 }));
