@@ -77,6 +77,21 @@ const app = express();
 const PORT = 3456;
 
 const COL_LABELS = { 'idea': 'Idea', 'backlog': 'Backlog', 'in-progress': 'In Progress', 'in-review': 'In Review', 'done': 'Done' };
+
+// ─── Activity Log helpers ─────────────────────────────────────────────────────
+// Appends an entry to the inline activityLog JSON array on a task row.
+function appendActivityLogEntry(taskId, event, description, actor) {
+  const task = db.prepare('SELECT activityLog FROM tasks WHERE id = ?').get(taskId);
+  if (!task) return;
+  const log = task.activityLog ? JSON.parse(task.activityLog) : [];
+  log.push({
+    event,
+    timestamp: new Date().toISOString(),
+    description,
+    actor: actor || 'System',
+  });
+  db.prepare('UPDATE tasks SET activityLog = ? WHERE id = ?').run(JSON.stringify(log), taskId);
+}
 const VALID_PRIORITIES = ['urgent', 'high', 'medium', 'low'];
 const VALID_COLUMNS = ['idea', 'backlog', 'in-progress', 'in-review', 'done'];
 const VALID_RECURRING_RE = /^(daily|weekly|monthly|every:\d+[hd])$/;
@@ -1146,6 +1161,7 @@ app.get('/api/tasks', (req, res) => {
       blockedBy: row.blockedBy ? JSON.parse(row.blockedBy) : [],
       blocked: (row.blockedBy ? JSON.parse(row.blockedBy) : []).some(id => !doneIds.has(id)),
       handoffLog: row.handoffLog ? JSON.parse(row.handoffLog) : [],
+      activityLog: row.activityLog ? JSON.parse(row.activityLog) : [],
       agentStatus: (() => {
         if (row.column === 'done') return 'done';
         if (!row.lockedBy) return 'idle';
@@ -1381,6 +1397,9 @@ app.post('/api/tasks/:id/complete', (req, res) => {
           }
         }
       }
+      // Inline activityLog: record move + completion
+      appendActivityLogEntry(existing.id, 'move', `Moved from ${COL_LABELS[existing.column] || existing.column} → Done`, existing.assignee || 'System');
+      appendActivityLogEntry(existing.id, 'completed', 'Card completed', existing.assignee || 'System');
     });
 
     completeTask();
@@ -1392,6 +1411,7 @@ app.post('/api/tasks/:id/complete', (req, res) => {
       subtasks: finalTask.subtasks ? JSON.parse(finalTask.subtasks) : null,
       blockedBy: finalTask.blockedBy ? JSON.parse(finalTask.blockedBy) : [],
       handoffLog: finalTask.handoffLog ? JSON.parse(finalTask.handoffLog) : [],
+      activityLog: finalTask.activityLog ? JSON.parse(finalTask.activityLog) : [],
     };
 
     sseBroadcast(responseTask.projectId || 'default', 'task.updated', { task: responseTask });
@@ -1487,6 +1507,11 @@ app.post('/api/tasks', (req, res) => {
     db.prepare(
       'INSERT INTO card_activity (id, taskId, type, content, author, createdAt) VALUES (?, ?, ?, ?, ?, ?)'
     ).run(actId, task.id, 'created', `Card created in ${COL_LABELS[task.column] || task.column}`, task.assignee, task.createdAt);
+
+    // Initialize inline activityLog with creation entry
+    const creationLog = [{ event: 'created', timestamp: task.createdAt, description: `Card created in ${COL_LABELS[task.column] || task.column}`, actor: task.assignee }];
+    db.prepare('UPDATE tasks SET activityLog = ? WHERE id = ?').run(JSON.stringify(creationLog), task.id);
+    task.activityLog = creationLog;
 
     sseBroadcast(task.projectId, 'task.created', { task });
 
@@ -1692,8 +1717,27 @@ app.put('/api/tasks/:id', (req, res) => {
         }
       }
     }
+
+    // ─── Inline activityLog entries for key field changes ───────────────
+    const actor = updated.assignee || existing.assignee || 'System';
+    if (req.body.column && req.body.column !== existing.column) {
+      appendActivityLogEntry(existing.id, 'move', `Moved from ${COL_LABELS[existing.column] || existing.column} → ${COL_LABELS[req.body.column] || req.body.column}`, actor);
+      if (req.body.column === 'done') {
+        appendActivityLogEntry(existing.id, 'completed', 'Card completed', actor);
+      }
+    }
+    if (req.body.assignee !== undefined && req.body.assignee !== existing.assignee) {
+      appendActivityLogEntry(existing.id, 'assignee_change', `Assignee changed from ${existing.assignee || '(none)'} → ${req.body.assignee || '(none)'}`, actor);
+    }
+    if (req.body.priority !== undefined && req.body.priority !== existing.priority) {
+      appendActivityLogEntry(existing.id, 'priority_change', `Priority changed from ${existing.priority} → ${req.body.priority}`, actor);
+    }
   });
   updateTask();
+
+  // Re-read task to include updated activityLog in response
+  const finalTask = db.prepare('SELECT * FROM tasks WHERE id = ?').get(existing.id);
+  updated.activityLog = finalTask.activityLog ? JSON.parse(finalTask.activityLog) : [];
 
   // Fire external side effects outside the transaction.
   sseBroadcast(updated.projectId || 'default', 'task.updated', { task: updated });
@@ -1869,6 +1913,21 @@ app.patch('/api/tasks/:id', (req, res) => {
           }
         }
       }
+
+      // ─── Inline activityLog entries for key field changes ───────────────
+      const patchActor = patches.assignee || existing.assignee || 'System';
+      if (patches.column && patches.column !== existing.column) {
+        appendActivityLogEntry(existing.id, 'move', `Moved from ${COL_LABELS[existing.column] || existing.column} → ${COL_LABELS[patches.column] || patches.column}`, patchActor);
+        if (patches.column === 'done') {
+          appendActivityLogEntry(existing.id, 'completed', 'Card completed', patchActor);
+        }
+      }
+      if (patches.assignee !== undefined && patches.assignee !== existing.assignee) {
+        appendActivityLogEntry(existing.id, 'assignee_change', `Assignee changed from ${existing.assignee || '(none)'} → ${patches.assignee || '(none)'}`, patchActor);
+      }
+      if (patches.priority !== undefined && patches.priority !== existing.priority) {
+        appendActivityLogEntry(existing.id, 'priority_change', `Priority changed from ${existing.priority} → ${patches.priority}`, patchActor);
+      }
     });
     patchTask();
 
@@ -1879,6 +1938,7 @@ app.patch('/api/tasks/:id', (req, res) => {
       tags: JSON.parse(result.tags),
       subtasks: result.subtasks ? JSON.parse(result.subtasks) : null,
       blockedBy: result.blockedBy ? JSON.parse(result.blockedBy) : [],
+      activityLog: result.activityLog ? JSON.parse(result.activityLog) : [],
     };
 
     // Fire external side effects outside the transaction
@@ -1915,6 +1975,7 @@ app.get('/api/tasks/:id', (req, res) => {
       blockedBy: task.blockedBy ? JSON.parse(task.blockedBy) : [],
       blocked: activeBlockers.length > 0,
       handoffLog: task.handoffLog ? JSON.parse(task.handoffLog) : [],
+      activityLog: task.activityLog ? JSON.parse(task.activityLog) : [],
       agentStatus: (() => {
         if (task.column === 'done') return 'done';
         if (!task.lockedBy) return 'idle';

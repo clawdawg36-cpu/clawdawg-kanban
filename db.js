@@ -80,7 +80,7 @@ const TASKS_SCHEMA_V1_COLUMNS = [
   'agentSessionId',
   'agentStartedAt',
 ];
-const LATEST_SCHEMA_VERSION = 5;
+const LATEST_SCHEMA_VERSION = 6;
 
 // Open the database with error handling — better-sqlite3 throws synchronously
 // on corruption or permission errors, so we catch and exit gracefully.
@@ -265,6 +265,30 @@ const migrations = [
       if (!cols.includes('startAfter')) {
         db.exec('ALTER TABLE tasks ADD COLUMN startAfter TEXT DEFAULT NULL');
         console.log('Migrated: added startAfter column to tasks table');
+      }
+    },
+  },
+  {
+    version: 6,
+    apply() {
+      const cols = getTableColumns('tasks');
+      if (!cols.includes('activityLog')) {
+        db.exec("ALTER TABLE tasks ADD COLUMN activityLog TEXT DEFAULT '[]'");
+        console.log('Migrated: added activityLog column to tasks table');
+
+        // Backfill existing cards with a "created" entry
+        const tasks = db.prepare('SELECT id, createdAt, assignee FROM tasks').all();
+        const updateStmt = db.prepare('UPDATE tasks SET activityLog = ? WHERE id = ?');
+        for (const t of tasks) {
+          const entry = [{
+            event: 'created',
+            timestamp: t.createdAt,
+            description: 'Card created',
+            actor: t.assignee || 'System'
+          }];
+          updateStmt.run(JSON.stringify(entry), t.id);
+        }
+        console.log(`Backfilled activityLog for ${tasks.length} existing task(s)`);
       }
     },
   },
