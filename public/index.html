@@ -366,6 +366,30 @@ header {
   box-shadow: 0 4px 16px rgba(225, 112, 85, 0.2);
 }
 
+/* Scheduled (startAfter) badge */
+.scheduled-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 6px;
+  margin-top: 6px;
+  margin-bottom: 2px;
+  background: rgba(116, 185, 255, 0.15);
+  color: var(--blue, #74b9ff);
+  border: 1px solid rgba(116, 185, 255, 0.35);
+}
+
+.card.scheduled-future {
+  opacity: 0.6;
+}
+
+.card.scheduled-future:hover {
+  opacity: 0.85;
+}
+
 /* Date input styling */
 input[type="date"] {
   color-scheme: dark;
@@ -4086,6 +4110,28 @@ function dueBadgeHTML(dueDate) {
   }
 }
 
+function friendlyStartAfter(isoDate) {
+  if (!isoDate) return '';
+  const now = new Date();
+  const start = new Date(isoDate);
+  if (start <= now) return ''; // ready now
+  const diffMs = start - now;
+  const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+  if (diffDays <= 0) return '';
+  if (diffDays === 1) {
+    // Check if actually today vs tomorrow
+    const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59);
+    if (start <= todayEnd) return '\u{1F550} Today';
+    return '\u{1F550} Tomorrow';
+  }
+  if (diffDays === 2) return '\u{1F550} Tomorrow';
+  if (diffDays <= 6) return `\u{1F550} In ${diffDays} days`;
+  if (diffDays <= 8) return '\u{1F550} Next week';
+  if (diffDays <= 29) return `\u{1F550} In ${diffDays} days`;
+  if (diffDays <= 35) return '\u{1F550} Next month';
+  return `\u{1F550} In ${diffDays} days`;
+}
+
 function cardHTML(t, q) {
   const date = new Date(t.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   const avatarClass = t.assignee === 'Mike' ? 'mike' : 'clawdawg';
@@ -4113,6 +4159,10 @@ function cardHTML(t, q) {
     : '';
 
   const waveBadge = t.wave != null ? `<div class="wave-badge">⚡ Wave ${t.wave}</div>` : '';
+
+  const scheduledLabel = friendlyStartAfter(t.startAfter);
+  const scheduledBadge = scheduledLabel ? `<div class="scheduled-badge">${scheduledLabel}</div>` : '';
+  const isScheduledFuture = !!scheduledLabel;
 
   const agentBadge = (t.agentSessionId && t.column !== 'done')
     ? (() => {
@@ -4142,7 +4192,7 @@ function cardHTML(t, q) {
   }
 
   const isSelected = selectedTaskIds.has(t.id);
-  return `<div class="card${isOverdue ? ' overdue-card' : ''}${blocked ? ' is-blocked' : ''}${t.column === 'idea' ? ' idea-card' : ''}${isSelected ? ' selected' : ''}" draggable="true" data-id="${t.id}" tabindex="0" data-action="cardBulkClick" data-task-id="${t.id}">
+  return `<div class="card${isOverdue ? ' overdue-card' : ''}${blocked ? ' is-blocked' : ''}${t.column === 'idea' ? ' idea-card' : ''}${isScheduledFuture ? ' scheduled-future' : ''}${isSelected ? ' selected' : ''}" draggable="true" data-id="${t.id}" tabindex="0" data-action="cardBulkClick" data-task-id="${t.id}">
     <div class="card-priority ${t.priority}"></div>
     <div class="card-checkbox-wrap"><input type="checkbox" class="card-checkbox" ${isSelected ? 'checked' : ''} data-action="cardBulkClick" data-task-id="${t.id}" aria-label="Select ${esc(t.title)}"></div>
     <div class="card-actions">
@@ -4156,6 +4206,7 @@ function cardHTML(t, q) {
     ${blockedBanner}
     ${tags ? `<div class="card-tags">${tags}</div>` : ''}
     ${waveBadge}
+    ${scheduledBadge}
     ${agentBadge}
     ${t.column !== 'done' && t.dueDate ? dueBadgeHTML(t.dueDate) : ''}
     ${t.recurring ? `<div class="recurring-badge">🔄 ${esc(t.recurring)}</div>` : ''}

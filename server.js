@@ -1070,6 +1070,20 @@ app.get('/api/tasks', (req, res) => {
       searchParams = [pattern, pattern, pattern];
     }
 
+    // ?ready=true — exclude tasks where startAfter is in the future
+    if (req.query.ready === 'true') {
+      searchClause += ` AND (startAfter IS NULL OR startAfter <= datetime('now'))`;
+    }
+
+    // ?startBefore=<ISO> — only tasks with startAfter <= the given datetime (or NULL)
+    if (req.query.startBefore) {
+      const sb = req.query.startBefore;
+      if (/^\d{4}-\d{2}-\d{2}(T[\d:.]+Z?)?$/.test(sb)) {
+        searchClause += ` AND (startAfter IS NULL OR startAfter <= ?)`;
+        searchParams.push(sb);
+      }
+    }
+
     let rows;
     let total;
     if (filterTag !== null) {
@@ -1152,6 +1166,66 @@ app.post('/api/tasks/:id/claim', (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// POST /api/tasks/claim-next — atomically claim the next available task
+app.post('/api/tasks/claim-next', (req, res) => {
+  try {
+    const { agentSessionId, projectId } = req.body;
+
+    if (!agentSessionId || typeof agentSessionId !== 'string' || agentSessionId.trim() === '') {
+      return res.status(400).json({ error: 'agentSessionId is required and must be a non-empty string' });
+    }
+
+    const pid = projectId || 'default';
+    const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(pid);
+    const now = new Date().toISOString();
+    const expiresAt = getTaskLockExpiryIso(project);
+
+    // Find first available backlog task: unlocked (or expired), not blocked, and startAfter ready
+    const candidate = db.prepare(
+      `SELECT id FROM tasks
+       WHERE projectId = ? AND "column" = 'backlog'
+         AND (lockedBy IS NULL OR lockExpiresAt < datetime('now'))
+         AND (startAfter IS NULL OR startAfter <= datetime('now'))
+       ORDER BY
+         CASE priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END,
+         createdAt ASC
+       LIMIT 1`
+    ).get(pid);
+
+    if (!candidate) {
+      return res.status(404).json({ error: 'No claimable tasks available' });
+    }
+
+    // Check blocked status in JS (blockedBy requires cross-referencing done status)
+    const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(candidate.id);
+    const blockedBy = task.blockedBy ? JSON.parse(task.blockedBy) : [];
+    if (blockedBy.length > 0) {
+      const doneIds = new Set(
+        db.prepare("SELECT id FROM tasks WHERE projectId = ? AND \"column\" = 'done'").all(pid).map(r => r.id)
+      );
+      if (blockedBy.some(id => !doneIds.has(id))) {
+        return res.status(404).json({ error: 'No claimable tasks available (all candidates blocked)' });
+      }
+    }
+
+    // Atomic claim
+    const result = db.prepare(
+      `UPDATE tasks SET lockedBy = ?, lockedAt = ?, lockExpiresAt = ?, agentSessionId = ?, agentStartedAt = ?
+       WHERE id = ? AND (lockedBy IS NULL OR lockExpiresAt < datetime('now'))`
+    ).run(agentSessionId, now, expiresAt, agentSessionId, now, candidate.id);
+
+    if (result.changes === 0) {
+      return res.status(409).json({ error: 'Race condition — task was claimed by another agent' });
+    }
+
+    const updated = db.prepare('SELECT * FROM tasks WHERE id = ?').get(candidate.id);
+    res.json({ ...updated, tags: JSON.parse(updated.tags), subtasks: updated.subtasks ? JSON.parse(updated.subtasks) : null });
+  } catch (err) {
+    console.error('POST /api/tasks/claim-next error:', err);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
