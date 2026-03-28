@@ -801,7 +801,7 @@ app.get('/api/projects/:id/export', (req, res) => {
       return res.json(snapshot);
     }
     if (format === 'csv') {
-      const CSV_FIELDS = ['id', 'title', 'description', 'assignee', 'priority', 'tags', 'column', 'createdAt', 'dueDate', 'recurring', 'projectId', 'wave'];
+      const CSV_FIELDS = ['id', 'title', 'description', 'assignee', 'priority', 'tags', 'column', 'createdAt', 'dueDate', 'recurring', 'projectId', 'wave', 'startAfter'];
       const escapeCsv = (val) => {
         if (val === null || val === undefined) return '';
         const str = String(val).replace(/"/g, '""');
@@ -873,10 +873,11 @@ app.post('/api/projects/:id/import', (req, res) => {
         const wave = Number.isInteger(raw.wave) && raw.wave >= 0 ? raw.wave : null;
         const dueDate = raw.dueDate ? String(raw.dueDate).slice(0, 10) : null;
         const subtasks = raw.subtasks ? JSON.stringify(raw.subtasks) : null;
+        const startAfter = (raw.startAfter && typeof raw.startAfter === 'string' && !Number.isNaN(Date.parse(raw.startAfter))) ? raw.startAfter : null;
 
         const id = crypto.randomBytes(12).toString('base64url');
         db.prepare(
-          'INSERT INTO tasks (id, title, description, assignee, priority, tags, "column", createdAt, dueDate, recurring, subtasks, projectId, wave, blockedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+          'INSERT INTO tasks (id, title, description, assignee, priority, tags, "column", createdAt, dueDate, recurring, subtasks, projectId, wave, blockedBy, startAfter) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         ).run(
           id,
           title,
@@ -891,7 +892,8 @@ app.post('/api/projects/:id/import', (req, res) => {
           subtasks,
           req.params.id,
           wave,
-          JSON.stringify(blockedBy)
+          JSON.stringify(blockedBy),
+          startAfter
         );
 
         const actId = crypto.randomBytes(12).toString('base64url');
@@ -1316,6 +1318,11 @@ app.post('/api/tasks', (req, res) => {
         return res.status(400).json({ error: 'Invalid wave. Must be null or a non-negative integer' });
       }
     }
+    if (req.body.startAfter !== undefined && req.body.startAfter !== null) {
+      if (typeof req.body.startAfter !== 'string' || Number.isNaN(Date.parse(req.body.startAfter))) {
+        return res.status(400).json({ error: 'Invalid startAfter. Must be null or a valid ISO 8601 datetime string' });
+      }
+    }
 
     const blockedByArr = Array.isArray(req.body.blockedBy) ? req.body.blockedBy : [];
 
@@ -1354,10 +1361,11 @@ app.post('/api/tasks', (req, res) => {
       projectId: req.body.projectId || 'default',
       wave: req.body.wave !== undefined ? req.body.wave : null,
       blockedBy: blockedByArr,
+      startAfter: req.body.startAfter || null,
     };
     db.prepare(
-      'INSERT INTO tasks (id, title, description, assignee, priority, tags, "column", createdAt, recurring, subtasks, projectId, wave, blockedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-    ).run(task.id, task.title, task.description, task.assignee, task.priority, JSON.stringify(task.tags), task.column, task.createdAt, task.recurring, task.subtasks ? JSON.stringify(task.subtasks) : null, task.projectId, task.wave, JSON.stringify(blockedByArr));
+      'INSERT INTO tasks (id, title, description, assignee, priority, tags, "column", createdAt, recurring, subtasks, projectId, wave, blockedBy, startAfter) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+    ).run(task.id, task.title, task.description, task.assignee, task.priority, JSON.stringify(task.tags), task.column, task.createdAt, task.recurring, task.subtasks ? JSON.stringify(task.subtasks) : null, task.projectId, task.wave, JSON.stringify(blockedByArr), task.startAfter);
 
     // Sync blockedBy to task_dependencies (already validated above)
     for (const blockerId of blockedByArr) {
@@ -1397,9 +1405,14 @@ app.put('/api/tasks/:id', (req, res) => {
       return res.status(400).json({ error: 'Invalid wave. Must be null or a non-negative integer' });
     }
   }
+  if (req.body.startAfter !== undefined && req.body.startAfter !== null) {
+    if (typeof req.body.startAfter !== 'string' || Number.isNaN(Date.parse(req.body.startAfter))) {
+      return res.status(400).json({ error: 'Invalid startAfter. Must be null or a valid ISO 8601 datetime string' });
+    }
+  }
 
   // Allowlist of client-settable fields — protects lock/agent fields from mass-assignment
-  const ALLOWED_UPDATE_FIELDS = ['title', 'description', 'assignee', 'priority', 'tags', 'column', 'dueDate', 'recurring', 'subtasks', 'projectId', 'blockedBy', 'wave'];
+  const ALLOWED_UPDATE_FIELDS = ['title', 'description', 'assignee', 'priority', 'tags', 'column', 'dueDate', 'recurring', 'subtasks', 'projectId', 'blockedBy', 'wave', 'startAfter'];
   const clientUpdate = {};
   for (const field of ALLOWED_UPDATE_FIELDS) {
     if (req.body[field] !== undefined) clientUpdate[field] = req.body[field];
@@ -1464,11 +1477,11 @@ app.put('/api/tasks/:id', (req, res) => {
     }
 
     db.prepare(
-      'UPDATE tasks SET title = ?, description = ?, assignee = ?, priority = ?, tags = ?, "column" = ?, dueDate = ?, recurring = ?, subtasks = ?, projectId = ?, blockedBy = ?, wave = ?, agentSessionId = ?, agentStartedAt = ? WHERE id = ?'
-    ).run(updated.title, updated.description, updated.assignee, updated.priority, JSON.stringify(updated.tags), updated.column, updated.dueDate || null, updated.recurring || null, updated.subtasks ? JSON.stringify(updated.subtasks) : null, updated.projectId || 'default', JSON.stringify(updated.blockedBy), updated.wave, updated.agentSessionId, updated.agentStartedAt, updated.id);
+      'UPDATE tasks SET title = ?, description = ?, assignee = ?, priority = ?, tags = ?, "column" = ?, dueDate = ?, recurring = ?, subtasks = ?, projectId = ?, blockedBy = ?, wave = ?, agentSessionId = ?, agentStartedAt = ?, startAfter = ? WHERE id = ?'
+    ).run(updated.title, updated.description, updated.assignee, updated.priority, JSON.stringify(updated.tags), updated.column, updated.dueDate || null, updated.recurring || null, updated.subtasks ? JSON.stringify(updated.subtasks) : null, updated.projectId || 'default', JSON.stringify(updated.blockedBy), updated.wave, updated.agentSessionId, updated.agentStartedAt, updated.startAfter || null, updated.id);
 
     // Log field-change diffs for auditable fields
-    const DIFF_FIELDS = ['title', 'description', 'assignee', 'priority', 'dueDate', 'recurring', 'projectId', 'wave'];
+    const DIFF_FIELDS = ['title', 'description', 'assignee', 'priority', 'dueDate', 'recurring', 'projectId', 'wave', 'startAfter'];
     const diffNow = new Date().toISOString();
     for (const field of DIFF_FIELDS) {
       // Only diff fields the client actually sent
@@ -1604,8 +1617,13 @@ app.patch('/api/tasks/:id', (req, res) => {
         return res.status(400).json({ error: 'Invalid wave. Must be null or a non-negative integer' });
       }
     }
+    if (req.body.startAfter !== undefined && req.body.startAfter !== null) {
+      if (typeof req.body.startAfter !== 'string' || Number.isNaN(Date.parse(req.body.startAfter))) {
+        return res.status(400).json({ error: 'Invalid startAfter. Must be null or a valid ISO 8601 datetime string' });
+      }
+    }
 
-    const ALLOWED_PATCH_FIELDS = ['title', 'description', 'assignee', 'priority', 'column', 'tags', 'dueDate', 'recurring', 'subtasks', 'wave', 'blockedBy', 'sortOrder'];
+    const ALLOWED_PATCH_FIELDS = ['title', 'description', 'assignee', 'priority', 'column', 'tags', 'dueDate', 'recurring', 'subtasks', 'wave', 'blockedBy', 'sortOrder', 'startAfter'];
 
     // Collect only the fields the caller actually sent
     const patches = {};

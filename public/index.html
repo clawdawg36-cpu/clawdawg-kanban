@@ -3409,6 +3409,10 @@ kbd {
     </div>
     <div class="field-row">
       <div class="field">
+        <label>Starts After</label>
+        <input type="datetime-local" id="fStartAfter">
+      </div>
+      <div class="field">
         <label>🔄 Recurring</label>
         <select id="fRecurring">
           <option value="">None (one-time)</option>
@@ -4837,6 +4841,7 @@ function openModal(task) {
   document.getElementById('fPriority').value = task ? task.priority : 'medium';
   document.getElementById('fColumn').value = task ? task.column : 'backlog';
   document.getElementById('fDueDate').value = task && task.dueDate ? task.dueDate : '';
+  document.getElementById('fStartAfter').value = task && task.startAfter ? task.startAfter.slice(0, 16) : '';
   initTagEditor(task ? (task.tags || []) : []);
   document.getElementById('fRecurring').value = (task && task.recurring) ? task.recurring : '';
   document.getElementById('fWave').value = (task && task.wave != null) ? task.wave : '';
@@ -5314,6 +5319,7 @@ async function saveTask() {
     priority: document.getElementById('fPriority').value,
     column: document.getElementById('fColumn').value,
     dueDate: document.getElementById('fDueDate').value || null,
+    startAfter: document.getElementById('fStartAfter').value ? new Date(document.getElementById('fStartAfter').value).toISOString() : null,
     tags: getTagsFromEditor(),
     recurring: document.getElementById('fRecurring').value || null,
     subtasks: currentChecklist.length > 0 ? currentChecklist : null,

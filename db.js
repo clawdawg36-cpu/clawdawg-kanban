@@ -80,7 +80,7 @@ const TASKS_SCHEMA_V1_COLUMNS = [
   'agentSessionId',
   'agentStartedAt',
 ];
-const LATEST_SCHEMA_VERSION = 4;
+const LATEST_SCHEMA_VERSION = 5;
 
 // Open the database with error handling — better-sqlite3 throws synchronously
 // on corruption or permission errors, so we catch and exit gracefully.
@@ -255,6 +255,16 @@ const migrations = [
       if (!templateCols.includes('defaultColumn')) {
         db.exec("ALTER TABLE templates ADD COLUMN defaultColumn TEXT DEFAULT 'backlog'");
         console.log('Migrated: added defaultColumn column to templates table');
+      }
+    },
+  },
+  {
+    version: 5,
+    apply() {
+      const cols = getTableColumns('tasks');
+      if (!cols.includes('startAfter')) {
+        db.exec('ALTER TABLE tasks ADD COLUMN startAfter TEXT DEFAULT NULL');
+        console.log('Migrated: added startAfter column to tasks table');
       }
     },
   },
