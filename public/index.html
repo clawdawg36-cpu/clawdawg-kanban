@@ -3438,16 +3438,18 @@ kbd {
       </div>
       <div class="field">
         <label>🔄 Recurring</label>
-        <select id="fRecurring">
-          <option value="">None (one-time)</option>
-          <option value="daily">Daily</option>
-          <option value="weekly">Weekly</option>
-          <option value="monthly">Monthly</option>
-        </select>
+        <input type="text" id="fRecurring" list="recurringOptions" placeholder="daily, weekly, monthly, every:Xh, every:Xd">
+        <datalist id="recurringOptions">
+          <option value="daily">
+          <option value="weekly">
+          <option value="monthly">
+          <option value="every:12h">
+          <option value="every:3d">
+        </datalist>
       </div>
       <div class="field" style="display:flex;align-items:flex-end;padding-bottom:2px">
         <small style="color:var(--text-dim);font-size:11px;line-height:1.4">
-          When set, completing this task will<br>auto-respawn it in Backlog.
+          Completing this task auto-respawns it<br>with a startAfter delay matching the interval.
         </small>
       </div>
     </div>

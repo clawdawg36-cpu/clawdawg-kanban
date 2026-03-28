@@ -6,6 +6,31 @@ const helmet = require('helmet');
 const cors = require('cors');
 const db = require('./db');
 
+// ─── Recurrence interval parser ──────────────────────────────────────────────
+// Supported formats: 'daily', 'weekly', 'monthly', 'every:Xh', 'every:Xd'
+// Returns milliseconds for the interval, or null if unrecognized.
+function parseRecurrenceMs(recurring) {
+  if (!recurring) return null;
+  const r = recurring.trim().toLowerCase();
+  if (r === 'daily') return 24 * 60 * 60 * 1000;
+  if (r === 'weekly') return 7 * 24 * 60 * 60 * 1000;
+  if (r === 'monthly') return 30 * 24 * 60 * 60 * 1000;
+  const match = r.match(/^every:(\d+)(h|d)$/);
+  if (match) {
+    const num = parseInt(match[1], 10);
+    if (match[2] === 'h') return num * 60 * 60 * 1000;
+    if (match[2] === 'd') return num * 24 * 60 * 60 * 1000;
+  }
+  return null; // unrecognized format — no startAfter
+}
+
+// Calculate startAfter ISO string for a recurring clone
+function calcStartAfter(recurring) {
+  const ms = parseRecurrenceMs(recurring);
+  if (!ms) return null;
+  return new Date(Date.now() + ms).toISOString();
+}
+
 // ─── Multer config for file uploads ──────────────────────────────────────────
 const UPLOADS_DIR = path.join(__dirname, 'uploads');
 if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
@@ -54,6 +79,12 @@ const PORT = 3456;
 const COL_LABELS = { 'idea': 'Idea', 'backlog': 'Backlog', 'in-progress': 'In Progress', 'in-review': 'In Review', 'done': 'Done' };
 const VALID_PRIORITIES = ['urgent', 'high', 'medium', 'low'];
 const VALID_COLUMNS = ['idea', 'backlog', 'in-progress', 'in-review', 'done'];
+const VALID_RECURRING_RE = /^(daily|weekly|monthly|every:\d+[hd])$/;
+
+function friendlyDate(iso) {
+  const d = new Date(iso);
+  return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+}
 const MAX_AGENT_LOG_MESSAGE_BYTES = 10 * 1024;
 const SAFE_AGENT_MODEL_REGEX = /^[a-zA-Z0-9/_.-]+$/;
 const MAX_SPAWN_TASK_DESCRIPTION_LENGTH = 4000;
@@ -1314,13 +1345,15 @@ app.post('/api/tasks/:id/complete', (req, res) => {
       if (existing.recurring) {
         const newId = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
         const newCreatedAt = new Date().toISOString();
+        const startAfter = calcStartAfter(existing.recurring);
         db.prepare(
-          'INSERT INTO tasks (id, title, description, assignee, priority, tags, "column", createdAt, recurring, subtasks, projectId, wave) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-        ).run(newId, existing.title, existing.description, existing.assignee, existing.priority, existing.tags, 'backlog', newCreatedAt, existing.recurring, null, existing.projectId || 'default', existing.wave || null);
+          'INSERT INTO tasks (id, title, description, assignee, priority, tags, "column", createdAt, recurring, subtasks, projectId, wave, startAfter) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        ).run(newId, existing.title, existing.description, existing.assignee, existing.priority, existing.tags, 'backlog', newCreatedAt, existing.recurring, null, existing.projectId || 'default', existing.wave || null, startAfter);
         const recActId = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+        const scheduleNote = startAfter ? ` — scheduled after ${friendlyDate(startAfter)}` : '';
         db.prepare(
           'INSERT INTO card_activity (id, taskId, type, content, author, createdAt) VALUES (?, ?, ?, ?, ?, ?)'
-        ).run(recActId, newId, 'created', `Recurring card created (${existing.recurring}) from completed task`, 'System', newCreatedAt);
+        ).run(recActId, newId, 'created', `Recurring card created (${existing.recurring}) from completed task${scheduleNote}`, 'System', newCreatedAt);
       }
 
       if (existing.wave != null) {
@@ -1396,6 +1429,9 @@ app.post('/api/tasks', (req, res) => {
       if (typeof req.body.startAfter !== 'string' || Number.isNaN(Date.parse(req.body.startAfter))) {
         return res.status(400).json({ error: 'Invalid startAfter. Must be null or a valid ISO 8601 datetime string' });
       }
+    }
+    if (req.body.recurring && !VALID_RECURRING_RE.test(req.body.recurring)) {
+      return res.status(400).json({ error: 'Invalid recurring format. Use: daily, weekly, monthly, every:Xh, or every:Xd' });
     }
 
     const blockedByArr = Array.isArray(req.body.blockedBy) ? req.body.blockedBy : [];
@@ -1483,6 +1519,9 @@ app.put('/api/tasks/:id', (req, res) => {
     if (typeof req.body.startAfter !== 'string' || Number.isNaN(Date.parse(req.body.startAfter))) {
       return res.status(400).json({ error: 'Invalid startAfter. Must be null or a valid ISO 8601 datetime string' });
     }
+  }
+  if (req.body.recurring && !VALID_RECURRING_RE.test(req.body.recurring)) {
+    return res.status(400).json({ error: 'Invalid recurring format. Use: daily, weekly, monthly, every:Xh, or every:Xd' });
   }
 
   // Allowlist of client-settable fields — protects lock/agent fields from mass-assignment
@@ -1609,13 +1648,15 @@ app.put('/api/tasks/:id', (req, res) => {
       if (req.body.column === 'done' && existing.recurring) {
         const newId = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
         const newCreatedAt = new Date().toISOString();
+        const startAfter = calcStartAfter(existing.recurring);
         db.prepare(
-          'INSERT INTO tasks (id, title, description, assignee, priority, tags, "column", createdAt, recurring, subtasks, projectId, wave) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-        ).run(newId, existing.title, existing.description, existing.assignee, existing.priority, existing.tags, 'backlog', newCreatedAt, existing.recurring, null, existing.projectId || 'default', existing.wave || null);
+          'INSERT INTO tasks (id, title, description, assignee, priority, tags, "column", createdAt, recurring, subtasks, projectId, wave, startAfter) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        ).run(newId, existing.title, existing.description, existing.assignee, existing.priority, existing.tags, 'backlog', newCreatedAt, existing.recurring, null, existing.projectId || 'default', existing.wave || null, startAfter);
         const recActId = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+        const scheduleNote = startAfter ? ` — scheduled after ${friendlyDate(startAfter)}` : '';
         db.prepare(
           'INSERT INTO card_activity (id, taskId, type, content, author, createdAt) VALUES (?, ?, ?, ?, ?, ?)'
-        ).run(recActId, newId, 'created', `Recurring card created (${existing.recurring}) from completed task`, 'System', newCreatedAt);
+        ).run(recActId, newId, 'created', `Recurring card created (${existing.recurring}) from completed task${scheduleNote}`, 'System', newCreatedAt);
       }
 
       // Wave auto-promotion: when all tasks in wave N are done, promote wave N+1 to backlog
@@ -1695,6 +1736,9 @@ app.patch('/api/tasks/:id', (req, res) => {
       if (typeof req.body.startAfter !== 'string' || Number.isNaN(Date.parse(req.body.startAfter))) {
         return res.status(400).json({ error: 'Invalid startAfter. Must be null or a valid ISO 8601 datetime string' });
       }
+    }
+    if (req.body.recurring && !VALID_RECURRING_RE.test(req.body.recurring)) {
+      return res.status(400).json({ error: 'Invalid recurring format. Use: daily, weekly, monthly, every:Xh, or every:Xd' });
     }
 
     const ALLOWED_PATCH_FIELDS = ['title', 'description', 'assignee', 'priority', 'column', 'tags', 'dueDate', 'recurring', 'subtasks', 'wave', 'blockedBy', 'sortOrder', 'startAfter'];
@@ -1782,13 +1826,15 @@ app.patch('/api/tasks/:id', (req, res) => {
         if (patches.column === 'done' && existing.recurring) {
           const newId = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
           const newCreatedAt = new Date().toISOString();
+          const startAfter = calcStartAfter(existing.recurring);
           db.prepare(
-            'INSERT INTO tasks (id, title, description, assignee, priority, tags, "column", createdAt, recurring, subtasks, projectId, wave) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-          ).run(newId, existing.title, existing.description, existing.assignee, existing.priority, existing.tags, 'backlog', newCreatedAt, existing.recurring, null, existing.projectId || 'default', existing.wave || null);
+            'INSERT INTO tasks (id, title, description, assignee, priority, tags, "column", createdAt, recurring, subtasks, projectId, wave, startAfter) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+          ).run(newId, existing.title, existing.description, existing.assignee, existing.priority, existing.tags, 'backlog', newCreatedAt, existing.recurring, null, existing.projectId || 'default', existing.wave || null, startAfter);
           const recActId = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+          const scheduleNote = startAfter ? ` — scheduled after ${friendlyDate(startAfter)}` : '';
           db.prepare(
             'INSERT INTO card_activity (id, taskId, type, content, author, createdAt) VALUES (?, ?, ?, ?, ?, ?)'
-          ).run(recActId, newId, 'created', `Recurring card created (${existing.recurring}) from completed task`, 'System', newCreatedAt);
+          ).run(recActId, newId, 'created', `Recurring card created (${existing.recurring}) from completed task${scheduleNote}`, 'System', newCreatedAt);
         }
 
         // Wave auto-promotion
