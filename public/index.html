@@ -3056,6 +3056,46 @@ body.select-mode .card.selected {
 }
 .confirm-modal-confirm:hover { filter: brightness(1.12); }
 
+/* ─── Confirm Modal – mobile override (keep compact centered dialog, not bottom sheet) ─── */
+@media (max-width: 768px) {
+  #confirmModal {
+    display: none;
+    place-items: center;
+  }
+  #confirmModal.open {
+    display: grid;
+    align-items: center;
+    justify-items: center;
+  }
+  .confirm-modal-box {
+    width: auto;
+    max-width: 320px;
+    min-width: 260px;
+    border-radius: 16px;
+    padding: 24px 24px 20px;
+    text-align: center;
+    animation: modalIn 0.22s ease;
+  }
+  .confirm-modal-box h3 {
+    text-align: center;
+  }
+  .confirm-modal-box p {
+    text-align: center;
+  }
+  .confirm-modal-actions {
+    justify-content: center;
+    gap: 12px;
+  }
+  .confirm-modal-cancel,
+  .confirm-modal-confirm {
+    min-height: 44px;
+    min-width: 44px;
+    padding: 12px 20px;
+    font-size: 15px;
+    border-radius: 10px;
+  }
+}
+
 /* ─── Keyboard Shortcuts Overlay ─────────────────────────────────────────────── */
 #kbdOverlay {
   display: none;
