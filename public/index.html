@@ -5321,16 +5321,8 @@ function editTask(id) {
 
 async function deleteTask(id, e) {
   const task = tasks.find(t => t.id === id);
-  const isMobile = window.innerWidth <= 768;
-  const btn = e ? e.currentTarget || e.target : null;
-  if (btn && !isMobile) {
-    const confirmed = await confirmInline(btn);
-    if (!confirmed) return;
-  } else {
-    // Mobile or keyboard shortcut path — use centered modal
-    const confirmed = await confirmModal('Delete task?', `Delete "${task ? task.title : id}"? This cannot be undone.`);
-    if (!confirmed) return;
-  }
+  const confirmed = await confirmModal('Delete task?', `Delete "${task ? task.title : id}"? This cannot be undone.`);
+  if (!confirmed) return;
   try {
     const res = await fetch(`/api/tasks/${id}`, { method: 'DELETE' });
     if (!res.ok) throw new Error(`Server error: ${res.status}`);
