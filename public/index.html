@@ -3080,41 +3080,62 @@ body.select-mode .card.selected {
 }
 .confirm-modal-confirm:hover { filter: brightness(1.12); }
 
-/* ─── Confirm Modal – mobile override (keep compact centered dialog, not bottom sheet) ─── */
+/* ─── Confirm Modal – mobile override (compact centered dialog, NOT bottom sheet) ─── */
 @media (max-width: 768px) {
   #confirmModal {
+    position: fixed !important;
+    inset: 0 !important;
     display: none;
-    place-items: center;
+    align-items: center !important;
+    justify-content: center !important;
+    justify-items: center !important;
+    z-index: 200;
   }
   #confirmModal.open {
-    display: grid;
-    align-items: center;
-    justify-items: center;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
   }
-  .confirm-modal-box {
-    width: auto;
-    max-width: 320px;
-    min-width: 260px;
-    border-radius: 16px;
-    padding: 24px 24px 20px;
+  #confirmModal .confirm-modal-box {
+    position: relative !important;
+    width: auto !important;
+    max-width: 320px !important;
+    min-width: 260px !important;
+    max-height: none !important;
+    height: auto !important;
+    border-radius: 16px !important;
+    padding: 28px 24px 22px !important;
     text-align: center;
-    animation: modalIn 0.22s ease;
+    margin: 0 auto !important;
+    animation: modalIn 0.22s ease !important;
+    /* Override any bottom-sheet styles that might leak in */
+    bottom: auto !important;
+    top: auto !important;
+    left: auto !important;
+    right: auto !important;
+    transform: none !important;
+    overflow: visible !important;
   }
-  .confirm-modal-box h3 {
+  #confirmModal .confirm-modal-box h3 {
     text-align: center;
+    font-size: 17px;
+    margin: 0 0 12px;
   }
-  .confirm-modal-box p {
+  #confirmModal .confirm-modal-box p {
     text-align: center;
+    font-size: 14px;
+    margin: 0 0 24px;
+    line-height: 1.5;
   }
-  .confirm-modal-actions {
+  #confirmModal .confirm-modal-actions {
     justify-content: center;
     gap: 12px;
   }
-  .confirm-modal-cancel,
-  .confirm-modal-confirm {
+  #confirmModal .confirm-modal-cancel,
+  #confirmModal .confirm-modal-confirm {
     min-height: 44px;
-    min-width: 44px;
-    padding: 12px 20px;
+    min-width: 100px;
+    padding: 12px 24px;
     font-size: 15px;
     border-radius: 10px;
   }
