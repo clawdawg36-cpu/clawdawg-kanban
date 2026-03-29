@@ -4362,15 +4362,16 @@ function render() {
   const fa = document.getElementById('filterArchived');
   if (fa) fa.classList.toggle('active', showArchived);
 
-  // Render archived cards section
+  // Render archived cards inside the done column's card list
   let archivedSection = document.getElementById('archivedSection');
   if (showArchived && archivedTasks.length > 0) {
+    const doneList = document.querySelector('.card-list[data-col="done"]');
     if (!archivedSection) {
       archivedSection = document.createElement('div');
       archivedSection.id = 'archivedSection';
       archivedSection.className = 'archived-section';
-      document.querySelector('.board').after(archivedSection);
     }
+    if (doneList) doneList.appendChild(archivedSection);
     archivedSection.innerHTML = `<div class="archived-section-title">📦 Archived (${archivedTasks.length})</div>
       <div class="archived-cards-list">${archivedTasks.map(t => {
         const date = new Date(t.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
