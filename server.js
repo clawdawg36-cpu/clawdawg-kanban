@@ -1118,7 +1118,7 @@ app.get('/api/tasks', (req, res) => {
 
     // ?ready=true — exclude tasks where startAfter is in the future
     if (req.query.ready === 'true') {
-      searchClause += ` AND (startAfter IS NULL OR startAfter <= datetime('now'))`;
+      searchClause += ` AND (startAfter IS NULL OR REPLACE(startAfter, 'T', ' ') <= datetime('now'))`;
     }
 
     // ?startBefore=<ISO> — only tasks with startAfter <= the given datetime (or NULL)
@@ -1235,7 +1235,7 @@ app.post('/api/tasks/claim-next', (req, res) => {
       `SELECT id FROM tasks
        WHERE projectId = ? AND "column" = 'backlog'
          AND (lockedBy IS NULL OR lockExpiresAt < datetime('now'))
-         AND (startAfter IS NULL OR startAfter <= datetime('now'))
+         AND (startAfter IS NULL OR REPLACE(startAfter, 'T', ' ') <= datetime('now'))
        ORDER BY
          CASE priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END,
          createdAt ASC
