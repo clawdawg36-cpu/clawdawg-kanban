@@ -837,54 +837,7 @@ input[type="date"] {
   padding: 8px 0;
 }
 
-/* ─── Activity Timeline (inline activityLog) ─────────────────────────── */
-.timeline-section {
-  margin-top: 12px;
-  border-top: 1px solid var(--border);
-  padding-top: 8px;
-}
-.timeline-toggle {
-  display: flex; align-items: center; gap: 6px;
-  background: none; border: none; color: var(--text);
-  font-size: 13px; font-weight: 600; cursor: pointer;
-  padding: 6px 0; width: 100%;
-}
-.timeline-toggle:hover { color: var(--accent); }
-.timeline-toggle-arrow {
-  font-size: 10px; transition: transform 0.2s;
-  margin-left: auto;
-}
-.timeline-toggle.expanded .timeline-toggle-arrow { transform: rotate(180deg); }
-.timeline-body {
-  max-height: 0; overflow: hidden;
-  transition: max-height 0.25s ease;
-}
-.timeline-body.open { max-height: 300px; overflow-y: auto; }
-.timeline-list { padding: 4px 0; }
-.timeline-entry {
-  display: flex; align-items: flex-start; gap: 8px;
-  padding: 4px 0; font-size: 12px;
-  border-left: 2px solid var(--border);
-  padding-left: 10px; margin-left: 6px;
-}
-.timeline-entry:last-child { border-left-color: transparent; }
-.timeline-dot {
-  width: 8px; height: 8px; border-radius: 50%;
-  flex-shrink: 0; margin-top: 3px;
-}
-.timeline-dot.created { background: #00b894; }
-.timeline-dot.move { background: #0984e3; }
-.timeline-dot.assignee_change { background: #6c5ce7; }
-.timeline-dot.priority_change { background: #fdcb6e; }
-.timeline-dot.completed { background: #00cec9; }
-.timeline-info { flex: 1; min-width: 0; }
-.timeline-desc {
-  color: var(--text); line-height: 1.3;
-}
-.timeline-time {
-  color: var(--text-dim); font-size: 11px;
-  margin-top: 1px;
-}
+
 
 .comment-form {
   display: flex;
@@ -3670,19 +3623,6 @@ kbd {
       <button class="btn-save" id="btnSaveTask">Save Task</button>
     </div>
 
-    <!-- Activity Timeline (inline activityLog) — only shown when editing -->
-    <div class="timeline-section" id="timelineSection" style="display:none">
-      <button class="timeline-toggle" id="timelineToggle" aria-expanded="false">
-        <span>📋</span> Activity Timeline
-        <span class="timeline-toggle-arrow">▼</span>
-      </button>
-      <div class="timeline-body" id="timelineBody">
-        <div class="timeline-list" id="timelineList">
-          <div class="activity-empty">No timeline entries.</div>
-        </div>
-      </div>
-    </div>
-
     <!-- Activity & Comments (only shown when editing) -->
     <div class="activity-section" id="activitySection" style="display:none">
       <button class="activity-toggle" id="activityToggle" aria-expanded="false">
@@ -4991,7 +4931,7 @@ function applyTemplate() {
 // Modal
 let activityOpen = false;
 let currentTaskActivity = [];
-let timelineOpen = false;
+
 
 // ─── Focus Trap ──────────────────────────────────────────────────────────────
 const FOCUSABLE_SELECTORS = [
@@ -5092,18 +5032,7 @@ function openModal(task) {
     depSection.style.display = 'none';
   }
 
-  // Activity Timeline section — only for existing tasks
-  const timelineSection = document.getElementById('timelineSection');
-  if (task) {
-    timelineSection.style.display = '';
-    timelineOpen = false;
-    document.getElementById('timelineToggle').classList.remove('expanded');
-    document.getElementById('timelineToggle').setAttribute('aria-expanded', 'false');
-    document.getElementById('timelineBody').classList.remove('open');
-    renderTimeline(task.activityLog || []);
-  } else {
-    timelineSection.style.display = 'none';
-  }
+
 
   // Activity section — only for existing tasks
   const actSection = document.getElementById('activitySection');
@@ -5301,34 +5230,7 @@ function toggleActivity() {
   }
 }
 
-function toggleTimeline() {
-  timelineOpen = !timelineOpen;
-  const toggle = document.getElementById('timelineToggle');
-  toggle.classList.toggle('expanded', timelineOpen);
-  toggle.setAttribute('aria-expanded', String(timelineOpen));
-  document.getElementById('timelineBody').classList.toggle('open', timelineOpen);
-}
 
-function renderTimeline(entries) {
-  const list = document.getElementById('timelineList');
-  if (!entries || !entries.length) {
-    list.innerHTML = '<div class="activity-empty">No timeline entries.</div>';
-    return;
-  }
-  // Show newest first
-  const sorted = [...entries].reverse();
-  list.innerHTML = sorted.map(e => {
-    const dotClass = e.event || 'created';
-    const time = formatRelTime(e.timestamp);
-    return `<div class="timeline-entry">
-      <div class="timeline-dot ${esc(dotClass)}"></div>
-      <div class="timeline-info">
-        <div class="timeline-desc">${esc(e.description)}</div>
-        <div class="timeline-time">${esc(e.actor || 'System')} · ${time}</div>
-      </div>
-    </div>`;
-  }).join('');
-}
 
 let handoffOpen = false;
 let currentHandoffLog = [];
@@ -6949,7 +6851,6 @@ document.addEventListener('DOMContentLoaded', function() {
   document.getElementById('attachUploadBtn').addEventListener('click', uploadAttachments);
   document.getElementById('modalCancelBtn').addEventListener('click', closeModal);
   document.getElementById('btnSaveTask').addEventListener('click', saveTask);
-  document.getElementById('timelineToggle').addEventListener('click', toggleTimeline);
   document.getElementById('activityToggle').addEventListener('click', toggleActivity);
   document.getElementById('commentInput').addEventListener('keydown', function(e) {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submitComment(); }
