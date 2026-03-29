@@ -257,6 +257,98 @@ header {
   font-weight: 500;
 }
 
+.archive-all-done-btn {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  color: var(--text-dim);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background var(--transition), color var(--transition);
+}
+.archive-all-done-btn:hover {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+.card-archive-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0;
+  border-radius: 4px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.card:hover .card-archive-btn { opacity: 0.7; }
+.card-archive-btn:hover { opacity: 1 !important; background: var(--surface2); }
+
+.card.archived-card {
+  opacity: 0.55;
+  border-left: 3px solid var(--text-dim);
+}
+.card.archived-card .card-title {
+  text-decoration: line-through;
+}
+.card.archived-card .card-actions { display: none; }
+.card.archived-card .card-move-actions { display: none; }
+
+.archived-badge {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(108,92,231,0.12);
+  color: var(--accent);
+  margin-top: 4px;
+}
+
+.unarchive-btn {
+  font-size: 11px;
+  padding: 3px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  color: var(--text);
+  cursor: pointer;
+  margin-top: 6px;
+  transition: background var(--transition);
+}
+.unarchive-btn:hover {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+.archived-section {
+  margin-top: 16px;
+  padding: 16px;
+  border-radius: 10px;
+  background: var(--surface);
+  border: 1px dashed var(--border);
+}
+.archived-section-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-dim);
+  margin-bottom: 12px;
+}
+.archived-cards-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
 .card-list {
   padding: 12px;
   flex: 1;
@@ -3399,6 +3491,7 @@ kbd {
     <div class="search-toggle-group">
       <button class="search-toggle-btn" id="filterBlocked" title="Show only blocked tasks">🚫 Blocked</button>
       <button class="search-toggle-btn" id="filterOverdue" title="Show only overdue tasks">⚠️ Overdue</button>
+      <button class="search-toggle-btn" id="filterArchived" title="Show archived tasks">📦 Archived</button>
     </div>
     <span class="search-results-info" id="searchResultsInfo"></span>
     <button class="search-reset-btn" id="searchResetBtn">Reset filters</button>
@@ -3486,6 +3579,7 @@ kbd {
     <div class="column-header">
       <span class="column-title"><span class="column-dot"></span>Done</span>
       <span class="column-count" data-count="done">0</span>
+      <button class="archive-all-done-btn" id="archiveAllDoneBtn" title="Archive all done tasks">📦 Archive All</button>
     </div>
     <div class="card-list" data-col="done"></div>
   </div>
@@ -3921,6 +4015,8 @@ let filterWave = '';
 let filterAgentStatus = '';
 let filterBlocked = false;
 let filterOverdue = false;
+let showArchived = false;
+let archivedTasks = [];
 let searchDebounceTimer = null;
 
 // --- Dependency helpers ---
@@ -4036,6 +4132,60 @@ async function loadTasks() {
   } catch (err) {
     console.error('loadTasks failed:', err);
     showBoardError(`Failed to load tasks: ${err.message}`);
+  }
+}
+
+async function loadArchivedTasks() {
+  try {
+    const res = await fetch(`/api/tasks?projectId=${encodeURIComponent(activeProjectId)}&archived=true&limit=200`);
+    if (!res.ok) throw new Error(`Server error: ${res.status}`);
+    const data = await res.json();
+    archivedTasks = Array.isArray(data) ? data : (data.items || []);
+  } catch (err) {
+    console.error('loadArchivedTasks failed:', err);
+    archivedTasks = [];
+  }
+}
+
+async function archiveTask(taskId) {
+  try {
+    const res = await fetch(`/api/tasks/${taskId}/archive`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    if (!res.ok) throw new Error(`Server error: ${res.status}`);
+    await loadTasks();
+    if (showArchived) await loadArchivedTasks();
+    render();
+  } catch (err) {
+    console.error('archiveTask failed:', err);
+  }
+}
+
+async function unarchiveTask(taskId) {
+  try {
+    const res = await fetch(`/api/tasks/${taskId}/unarchive`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    if (!res.ok) throw new Error(`Server error: ${res.status}`);
+    await loadTasks();
+    if (showArchived) await loadArchivedTasks();
+    render();
+  } catch (err) {
+    console.error('unarchiveTask failed:', err);
+  }
+}
+
+async function archiveAllDone() {
+  try {
+    const res = await fetch('/api/tasks/archive-done', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ projectId: activeProjectId }),
+    });
+    if (!res.ok) throw new Error(`Server error: ${res.status}`);
+    const data = await res.json();
+    if (data.archived === 0) return;
+    await loadTasks();
+    if (showArchived) await loadArchivedTasks();
+    render();
+  } catch (err) {
+    console.error('archiveAllDone failed:', err);
   }
 }
 
@@ -4209,6 +4359,37 @@ function render() {
   if (fas) fas.classList.toggle('active', !!filterAgentStatus);
   if (fb) fb.classList.toggle('active', filterBlocked);
   if (fo) fo.classList.toggle('active', filterOverdue);
+  const fa = document.getElementById('filterArchived');
+  if (fa) fa.classList.toggle('active', showArchived);
+
+  // Render archived cards section
+  let archivedSection = document.getElementById('archivedSection');
+  if (showArchived && archivedTasks.length > 0) {
+    if (!archivedSection) {
+      archivedSection = document.createElement('div');
+      archivedSection.id = 'archivedSection';
+      archivedSection.className = 'archived-section';
+      document.querySelector('.board').after(archivedSection);
+    }
+    archivedSection.innerHTML = `<div class="archived-section-title">📦 Archived (${archivedTasks.length})</div>
+      <div class="archived-cards-list">${archivedTasks.map(t => {
+        const date = new Date(t.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        const archivedDate = t.archivedAt ? new Date(t.archivedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '';
+        return `<div class="card archived-card" data-id="${t.id}">
+          <div class="card-priority ${t.priority}"></div>
+          <div class="card-title">${esc(t.title)}</div>
+          ${t.description ? `<div class="card-desc">${esc(t.description)}</div>` : ''}
+          <div class="archived-badge">📦 Archived ${archivedDate}</div>
+          <div class="card-meta">
+            <span class="card-assignee">${esc(t.assignee)}</span>
+            <span class="card-date">${date}</span>
+          </div>
+          <button class="unarchive-btn" data-action="unarchiveTask" data-task-id="${t.id}">Unarchive</button>
+        </div>`;
+      }).join('')}</div>`;
+  } else if (archivedSection) {
+    archivedSection.remove();
+  }
 }
 
 function dueBadgeHTML(dueDate) {
@@ -4316,6 +4497,7 @@ function cardHTML(t, q) {
     <div class="card-checkbox-wrap"><input type="checkbox" class="card-checkbox" ${isSelected ? 'checked' : ''} data-action="cardBulkClick" data-task-id="${t.id}" aria-label="Select ${esc(t.title)}"></div>
     <div class="card-actions">
       ${(t.column === 'backlog' && !t.lockedBy && !isBlocked(t.id)) ? `<button class="card-action-btn" data-action="spawnAgent" data-task-id="${t.id}" title="Run agent" aria-label="Run agent for ${esc(t.title)}">▶</button>` : ''}
+      ${t.column === 'done' ? `<button class="card-archive-btn" data-action="archiveTask" data-task-id="${t.id}" title="Archive card">📦</button>` : ''}
       <button class="card-action-btn" data-action="editTask" data-task-id="${t.id}" title="Edit card" aria-label="Edit ${esc(t.title)}">&#9998;</button>
       <button class="card-action-btn delete" data-action="deleteTask" data-task-id="${t.id}" title="Delete card" aria-label="Delete ${esc(t.title)}">&times;</button>
     </div>
@@ -4691,6 +4873,20 @@ document.querySelectorAll('.card-list').forEach(list => {
       render();
     });
   }
+
+  const filterArchivedBtn = document.getElementById('filterArchived');
+  if (filterArchivedBtn) {
+    filterArchivedBtn.addEventListener('click', async () => {
+      showArchived = !showArchived;
+      filterArchivedBtn.classList.toggle('active', showArchived);
+      if (showArchived) {
+        await loadArchivedTasks();
+      } else {
+        archivedTasks = [];
+      }
+      render();
+    });
+  }
 })();
 
 function resetSearch() {
@@ -4717,6 +4913,10 @@ function resetSearch() {
   if (fb) fb.classList.remove('active');
   const fo = document.getElementById('filterOverdue');
   if (fo) fo.classList.remove('active');
+  showArchived = false;
+  archivedTasks = [];
+  const far = document.getElementById('filterArchived');
+  if (far) far.classList.remove('active');
   render();
 }
 
@@ -6828,6 +7028,7 @@ document.addEventListener('DOMContentLoaded', function() {
   document.getElementById('statsBtn').addEventListener('click', openStats);
   document.getElementById('addTaskBtn').addEventListener('click', function() { openModal(); });
   document.getElementById('searchResetBtn').addEventListener('click', resetSearch);
+  document.getElementById('archiveAllDoneBtn').addEventListener('click', archiveAllDone);
   document.getElementById('retryBtn').addEventListener('click', retryLoad);
   document.getElementById('fabBtn').addEventListener('click', function() { openModal(); });
   document.getElementById('fTemplate').addEventListener('change', applyTemplate);
@@ -6945,6 +7146,14 @@ document.addEventListener('DOMContentLoaded', function() {
       case 'spawnAgent':
         e.stopPropagation();
         spawnAgent(taskId, e);
+        break;
+      case 'archiveTask':
+        e.stopPropagation();
+        archiveTask(taskId);
+        break;
+      case 'unarchiveTask':
+        e.stopPropagation();
+        unarchiveTask(taskId);
         break;
       case 'cardBulkClick':
         onCardBulkClick(e, taskId);

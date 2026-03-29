@@ -80,7 +80,7 @@ const TASKS_SCHEMA_V1_COLUMNS = [
   'agentSessionId',
   'agentStartedAt',
 ];
-const LATEST_SCHEMA_VERSION = 6;
+const LATEST_SCHEMA_VERSION = 7;
 
 // Open the database with error handling — better-sqlite3 throws synchronously
 // on corruption or permission errors, so we catch and exit gracefully.
@@ -289,6 +289,16 @@ const migrations = [
           updateStmt.run(JSON.stringify(entry), t.id);
         }
         console.log(`Backfilled activityLog for ${tasks.length} existing task(s)`);
+      }
+    },
+  },
+  {
+    version: 7,
+    apply() {
+      const cols = getTableColumns('tasks');
+      if (!cols.includes('archivedAt')) {
+        db.exec('ALTER TABLE tasks ADD COLUMN archivedAt TEXT DEFAULT NULL');
+        console.log('Migrated: added archivedAt column to tasks table');
       }
     },
   },

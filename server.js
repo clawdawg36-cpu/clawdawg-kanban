@@ -1116,6 +1116,24 @@ app.get('/api/tasks', (req, res) => {
       searchParams = [pattern, pattern, pattern];
     }
 
+    // Archive filtering: by default exclude archived tasks
+    if (req.query.archived === 'true') {
+      // Return ONLY archived tasks
+      searchClause += ` AND archivedAt IS NOT NULL`;
+    } else if (req.query.includeArchived !== 'true') {
+      // Default: exclude archived
+      searchClause += ` AND archivedAt IS NULL`;
+    }
+
+    // ?column=<col1,col2> — filter by column(s)
+    if (req.query.column) {
+      const cols = req.query.column.split(',').filter(c => VALID_COLUMNS.includes(c));
+      if (cols.length > 0) {
+        searchClause += ` AND "column" IN (${cols.map(() => '?').join(',')})`;
+        searchParams.push(...cols);
+      }
+    }
+
     // ?ready=true — exclude tasks where startAfter is in the future
     if (req.query.ready === 'true') {
       searchClause += ` AND (startAfter IS NULL OR REPLACE(startAfter, 'T', ' ') <= datetime('now'))`;
@@ -1179,6 +1197,81 @@ app.get('/api/tasks', (req, res) => {
   }
 });
 
+// ─── Archive endpoints ───────────────────────────────────────────────────────
+
+// POST /api/tasks/:id/archive — archive a single task
+app.post('/api/tasks/:id/archive', (req, res) => {
+  try {
+    const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id);
+    if (!task) return res.status(404).json({ error: 'Not found' });
+    if (task.archivedAt) return res.json({ ...task, tags: JSON.parse(task.tags), subtasks: task.subtasks ? JSON.parse(task.subtasks) : null, blockedBy: task.blockedBy ? JSON.parse(task.blockedBy) : [], handoffLog: task.handoffLog ? JSON.parse(task.handoffLog) : [], activityLog: task.activityLog ? JSON.parse(task.activityLog) : [] });
+
+    const now = new Date().toISOString();
+    db.prepare('UPDATE tasks SET archivedAt = ? WHERE id = ?').run(now, req.params.id);
+    appendActivityLogEntry(req.params.id, 'archived', 'Card archived', req.body.actor || 'System');
+
+    const updated = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id);
+    res.json({ ...updated, tags: JSON.parse(updated.tags), subtasks: updated.subtasks ? JSON.parse(updated.subtasks) : null, blockedBy: updated.blockedBy ? JSON.parse(updated.blockedBy) : [], handoffLog: updated.handoffLog ? JSON.parse(updated.handoffLog) : [], activityLog: updated.activityLog ? JSON.parse(updated.activityLog) : [] });
+  } catch (err) {
+    console.error('POST /api/tasks/:id/archive error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// POST /api/tasks/:id/unarchive — unarchive a single task
+app.post('/api/tasks/:id/unarchive', (req, res) => {
+  try {
+    const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id);
+    if (!task) return res.status(404).json({ error: 'Not found' });
+
+    db.prepare('UPDATE tasks SET archivedAt = NULL WHERE id = ?').run(req.params.id);
+    appendActivityLogEntry(req.params.id, 'unarchived', 'Card unarchived', req.body.actor || 'System');
+
+    const updated = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id);
+    res.json({ ...updated, tags: JSON.parse(updated.tags), subtasks: updated.subtasks ? JSON.parse(updated.subtasks) : null, blockedBy: updated.blockedBy ? JSON.parse(updated.blockedBy) : [], handoffLog: updated.handoffLog ? JSON.parse(updated.handoffLog) : [], activityLog: updated.activityLog ? JSON.parse(updated.activityLog) : [] });
+  } catch (err) {
+    console.error('POST /api/tasks/:id/unarchive error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// POST /api/tasks/archive-done — bulk archive all done tasks for a project
+app.post('/api/tasks/archive-done', (req, res) => {
+  try {
+    const projectId = req.body.projectId || 'default';
+    const now = new Date().toISOString();
+    const result = db.prepare(
+      `UPDATE tasks SET archivedAt = ? WHERE projectId = ? AND "column" = 'done' AND archivedAt IS NULL`
+    ).run(now, projectId);
+    res.json({ archived: result.changes });
+  } catch (err) {
+    console.error('POST /api/tasks/archive-done error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// GET /api/tasks/stats — lightweight counts by column
+app.get('/api/tasks/stats', (req, res) => {
+  try {
+    const projectId = req.query.projectId || 'default';
+    const rows = db.prepare(
+      `SELECT "column", COUNT(*) AS cnt FROM tasks WHERE projectId = ? AND archivedAt IS NULL GROUP BY "column"`
+    ).all(projectId);
+    const columns = { idea: 0, backlog: 0, 'in-progress': 0, 'in-review': 0, done: 0 };
+    for (const r of rows) {
+      if (r.column in columns) columns[r.column] = r.cnt;
+    }
+    const archived = db.prepare(
+      `SELECT COUNT(*) AS cnt FROM tasks WHERE projectId = ? AND archivedAt IS NOT NULL`
+    ).get(projectId).cnt;
+    const total = Object.values(columns).reduce((a, b) => a + b, 0) + archived;
+    res.json({ projectId, columns, archived, total });
+  } catch (err) {
+    console.error('GET /api/tasks/stats error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // POST /api/tasks/:id/claim — atomically lock a card
 app.post('/api/tasks/:id/claim', (req, res) => {
   try {
@@ -1234,6 +1327,7 @@ app.post('/api/tasks/claim-next', (req, res) => {
     const candidate = db.prepare(
       `SELECT id FROM tasks
        WHERE projectId = ? AND "column" = 'backlog'
+         AND archivedAt IS NULL
          AND (lockedBy IS NULL OR lockExpiresAt < datetime('now'))
          AND (startAfter IS NULL OR REPLACE(startAfter, 'T', ' ') <= datetime('now'))
        ORDER BY
