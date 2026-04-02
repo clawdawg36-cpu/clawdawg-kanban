@@ -254,6 +254,10 @@ app.use((req, res, next) => {
   res.on('close', cleanup);
   next();
 });
+const REACT_DIST = path.join(__dirname, 'client', 'dist');
+if (fs.existsSync(REACT_DIST)) {
+  app.use(express.static(REACT_DIST));
+}
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ─── API authentication (bearer token) ───────────────────────────────────────
@@ -2992,6 +2996,13 @@ expireStaleLocksStmt.run(); // clear on startup
 trackInterval(() => {
   expireStaleLocksStmt.run();
 }, 60000);
+
+// SPA fallback — serve React app for non-API routes
+if (fs.existsSync(REACT_DIST)) {
+  app.get('*', (req, res) => {
+    res.sendFile(path.join(REACT_DIST, 'index.html'));
+  });
+}
 
 const server = app.listen(PORT, '127.0.0.1', () => {
   console.log(`Kanban board running at http://127.0.0.1:${PORT}`);

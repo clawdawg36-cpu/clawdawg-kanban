@@ -5,6 +5,8 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
+    "build": "cd client && npm run build",
+    "preview": "npm run build && npm start",
     "dev:client": "cd client && npm run dev",
     "dev": "concurrently \"npm start\" \"npm run dev:client\""
   },
