@@ -3393,16 +3393,19 @@ kbd {
   background: var(--surface);
   border-left: 1px solid var(--border);
   z-index: 90;
-  display: none;
+  display: flex;
   flex-direction: column;
   overflow: hidden;
   box-shadow: -4px 0 24px rgba(0,0,0,0.3);
   transform: translateX(100%);
   transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  pointer-events: none;
+  visibility: hidden;
 }
 .peek-panel.open {
-  display: flex;
   transform: translateX(0);
+  pointer-events: auto;
+  visibility: visible;
 }
 .peek-panel-header {
   display: flex;
@@ -3776,7 +3779,7 @@ kbd {
 }
 
 @media (max-width: 768px) {
-  .view-toggle-group { display: none; }
+  .view-toggle-group { display: flex; gap: 4px; }
   .list-view-container { padding: 12px 16px; }
   .list-table th, .list-table td { padding: 8px 10px; font-size: 12px; }
   .timeline-view-container { padding: 12px 16px; }
@@ -8352,9 +8355,11 @@ document.addEventListener('DOMContentLoaded', function() {
 
   // Card click -> open peek panel (if not in select mode, not clicking a button)
   document.body.addEventListener('click', function(e) {
-    // Don't open peek if clicking a button, link, input, or action element inside the card
-    if (e.target.closest('[data-action]')) return;
-    if (e.target.closest('button, a, input, select')) return;
+    // Don't open peek if clicking a button, link, input, select, or a non-card action element
+    if (e.target.closest('button, a, input, select, .card-action-btn, .card-archive-btn, .card-move-btn, .card-checkbox-wrap, .card-blocked-banner, .unarchive-btn')) return;
+    // Allow clicks on the card itself (which has data-action="cardBulkClick") but block other data-action elements inside it
+    const actionEl = e.target.closest('[data-action]');
+    if (actionEl && !actionEl.classList.contains('card')) return;
     const card = e.target.closest('.card');
     if (!card) return;
     if (selectMode) return;
