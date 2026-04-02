@@ -1,0 +1,57 @@
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  padding: 2px 7px;
+  border-radius: 20px;
+  text-transform: uppercase;
+  line-height: 1.4;
+}
+
+.small {
+  font-size: 9px;
+  padding: 1px 5px;
+}
+
+.priorityUrgent {
+  background: rgba(225, 112, 85, 0.15);
+  color: var(--red);
+  border: 1px solid rgba(225, 112, 85, 0.3);
+}
+
+.priorityHigh {
+  background: rgba(253, 167, 73, 0.15);
+  color: var(--orange);
+  border: 1px solid rgba(253, 167, 73, 0.3);
+}
+
+.priorityMedium {
+  background: rgba(116, 185, 255, 0.15);
+  color: var(--blue);
+  border: 1px solid rgba(116, 185, 255, 0.3);
+}
+
+.priorityLow {
+  background: rgba(0, 184, 148, 0.15);
+  color: var(--green);
+  border: 1px solid rgba(0, 184, 148, 0.3);
+}
+
+.status {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 5px;
+  background: var(--surface2);
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+}
+
+.custom {
+  background: var(--surface2);
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+}

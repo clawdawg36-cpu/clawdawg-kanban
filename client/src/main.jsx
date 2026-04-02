@@ -7,6 +7,7 @@ import { TaskProvider } from './contexts/TaskContext';
 import { ProjectProvider } from './contexts/ProjectContext';
 import { FilterProvider } from './contexts/FilterContext';
 import { NotificationProvider } from './contexts/NotificationContext';
+import { BulkSelectProvider } from './contexts/BulkSelectContext';
 import { ToastProvider } from './components/layout/Toast';
 import App from './App';
 
@@ -18,7 +19,9 @@ createRoot(document.getElementById('root')).render(
           <FilterProvider>
             <NotificationProvider>
               <ToastProvider>
-                <App />
+                <BulkSelectProvider>
+                  <App />
+                </BulkSelectProvider>
               </ToastProvider>
             </NotificationProvider>
           </FilterProvider>

@@ -1,11 +1,17 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 import Header from './components/layout/Header';
 import Sidebar from './components/layout/Sidebar';
 import FilterBar from './components/filters/FilterBar';
 import Board from './components/board/Board';
+import ListView from './components/list/ListView';
+import TimelineView from './components/timeline/TimelineView';
 import TaskModal from './components/modal/TaskModal';
 import ProjectModal from './components/project/ProjectModal';
 import ProjectSwitcher from './components/project/ProjectSwitcher';
+import StatsPanel from './components/stats/StatsPanel';
+import BulkToolbar from './components/bulk/BulkToolbar';
+import KeyboardHelp from './components/common/KeyboardHelp';
+import useKeyboardShortcuts from './hooks/useKeyboardShortcuts';
 import styles from './App.module.css';
 
 function App() {
@@ -22,6 +28,12 @@ function App() {
 
   // Project switcher state
   const [switcherOpen, setSwitcherOpen] = useState(false);
+
+  // Stats panel state
+  const [statsOpen, setStatsOpen] = useState(false);
+
+  // Keyboard help state
+  const [kbdHelpOpen, setKbdHelpOpen] = useState(false);
 
   const toggleSidebar = () => setSidebarCollapsed(prev => !prev);
 
@@ -45,17 +57,30 @@ function App() {
     setProjectModalProject(null);
   }, []);
 
-  // Cmd+K / Ctrl+K to open project switcher
-  useEffect(() => {
-    const handleGlobalKeyDown = (e) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
-        e.preventDefault();
-        setSwitcherOpen(prev => !prev);
-      }
-    };
-    document.addEventListener('keydown', handleGlobalKeyDown);
-    return () => document.removeEventListener('keydown', handleGlobalKeyDown);
+  // Determine if any overlay is open for keyboard shortcut handling
+  const hasOpenOverlay = taskModalOpen || projectModalOpen || switcherOpen || statsOpen || kbdHelpOpen;
+
+  const closeTopOverlay = useCallback(() => {
+    if (kbdHelpOpen) { setKbdHelpOpen(false); return; }
+    if (statsOpen) { setStatsOpen(false); return; }
+    if (switcherOpen) { setSwitcherOpen(false); return; }
+    if (projectModalOpen) { closeProjectModal(); return; }
+    if (taskModalOpen) { closeTaskModal(); return; }
+  }, [kbdHelpOpen, statsOpen, switcherOpen, projectModalOpen, taskModalOpen, closeProjectModal, closeTaskModal]);
+
+  const focusSearch = useCallback(() => {
+    const input = document.querySelector('input[placeholder*="Search"]');
+    if (input) { input.focus(); input.select(); }
   }, []);
+
+  useKeyboardShortcuts({
+    onNewTask: () => openTaskModal(),
+    onFocusSearch: focusSearch,
+    onToggleKeyboardHelp: () => setKbdHelpOpen(prev => !prev),
+    onToggleSwitcher: () => setSwitcherOpen(prev => !prev),
+    onCloseOverlay: closeTopOverlay,
+    hasOpenOverlay,
+  });
 
   return (
     <div className={styles.appWrapper}>
@@ -68,6 +93,7 @@ function App() {
       <div className={`${styles.appContent} ${sidebarCollapsed ? styles.sidebarCollapsed : ''}`}>
         <Header
           onToggleSidebar={toggleSidebar}
+          onToggleStats={() => setStatsOpen(prev => !prev)}
           activeView={activeView}
           onViewChange={setActiveView}
           onAddTask={() => openTaskModal()}
@@ -77,14 +103,10 @@ function App() {
           <Board onCardClick={(task) => openTaskModal(task)} />
         )}
         {activeView === 'list' && (
-          <div style={{ padding: '24px 32px', color: 'var(--text-dim)', fontSize: 14 }}>
-            List view coming in Phase 3.
-          </div>
+          <ListView onTaskClick={(task) => openTaskModal(task)} />
         )}
         {activeView === 'timeline' && (
-          <div style={{ padding: '24px 32px', color: 'var(--text-dim)', fontSize: 14 }}>
-            Timeline view coming in Phase 3.
-          </div>
+          <TimelineView onTaskClick={(task) => openTaskModal(task)} />
         )}
       </div>
 
@@ -101,6 +123,17 @@ function App() {
       {/* Project Switcher */}
       {switcherOpen && (
         <ProjectSwitcher onClose={() => setSwitcherOpen(false)} />
+      )}
+
+      {/* Stats Panel */}
+      <StatsPanel open={statsOpen} onClose={() => setStatsOpen(false)} />
+
+      {/* Bulk Toolbar */}
+      <BulkToolbar />
+
+      {/* Keyboard Help Overlay */}
+      {kbdHelpOpen && (
+        <KeyboardHelp onClose={() => setKbdHelpOpen(false)} />
       )}
     </div>
   );

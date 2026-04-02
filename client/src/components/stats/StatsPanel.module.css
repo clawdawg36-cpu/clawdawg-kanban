@@ -1,0 +1,148 @@
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 5000;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(4px);
+  display: grid;
+  place-items: center;
+  animation: fadeIn 0.15s ease;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 28px;
+  width: 480px;
+  max-width: 90vw;
+  max-height: 80vh;
+  overflow-y: auto;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  animation: modalIn 0.25s ease;
+}
+
+@keyframes modalIn {
+  from { opacity: 0; transform: translateY(10px) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.title {
+  font-size: 18px;
+  font-weight: 700;
+  margin-bottom: 20px;
+  background: linear-gradient(135deg, #e4e6ef, #a29bfe);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.loadingMsg,
+.errorMsg {
+  text-align: center;
+  padding: 12px;
+  font-size: 13px;
+}
+
+.loadingMsg {
+  color: var(--text-dim);
+}
+
+.errorMsg {
+  color: var(--red);
+}
+
+.highlights {
+  display: flex;
+  gap: 20px;
+  margin-bottom: 20px;
+}
+
+.highlightCard {
+  flex: 1;
+  text-align: center;
+  padding: 14px;
+  background: var(--surface2);
+  border-radius: 10px;
+  border: 1px solid var(--border);
+}
+
+.highlightValue {
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 4px;
+}
+
+.highlightLabel {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.group {
+  margin-bottom: 18px;
+}
+
+.groupTitle {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 8px;
+}
+
+.totalLabel {
+  font-weight: 400;
+  color: var(--text-dim);
+}
+
+.row {
+  display: flex;
+  justify-content: space-between;
+  padding: 6px 0;
+  font-size: 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.row:last-child {
+  border-bottom: none;
+}
+
+.label {
+  color: var(--text);
+}
+
+.value {
+  font-weight: 600;
+  color: #a29bfe;
+}
+
+.pct {
+  color: var(--text-dim);
+  font-weight: 400;
+  font-size: 12px;
+}
+
+.closeBtn {
+  padding: 9px 18px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-dim);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: var(--transition);
+  margin-top: 10px;
+}
+
+.closeBtn:hover {
+  background: var(--surface2);
+  color: var(--text);
+}

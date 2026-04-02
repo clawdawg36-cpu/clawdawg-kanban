@@ -1,0 +1,75 @@
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9000;
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(4px);
+  display: grid;
+  place-items: center;
+}
+
+.box {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 28px 32px;
+  min-width: 340px;
+  max-width: 480px;
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5);
+}
+
+.title {
+  font-size: 16px;
+  font-weight: 700;
+  margin-bottom: 18px;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.titleText {
+  color: var(--accent);
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.table tr + tr td {
+  border-top: 1px solid var(--border);
+}
+
+.table td {
+  padding: 8px 4px;
+  font-size: 13px;
+  color: var(--text-dim);
+  vertical-align: middle;
+}
+
+.keysCell {
+  width: 120px;
+  padding-right: 16px;
+  white-space: nowrap;
+}
+
+.kbd {
+  display: inline-block;
+  padding: 2px 7px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--surface2);
+  font-family: 'SF Mono', ui-monospace, monospace;
+  font-size: 11px;
+  color: var(--text);
+  line-height: 1.6;
+  box-shadow: 0 1px 0 var(--border);
+}
+
+.closeHint {
+  margin-top: 18px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-dim);
+}
