@@ -1,0 +1,132 @@
+.board {
+  display: flex;
+  gap: 20px;
+  padding: 24px 32px;
+  min-height: calc(100vh - 81px);
+  align-items: flex-start;
+  position: relative;
+}
+
+/* Loading skeleton */
+.loadingOverlay {
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: 20px;
+  padding: 24px 32px;
+}
+
+.skeletonCol {
+  flex: 1;
+  min-width: 280px;
+  max-width: 340px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.skeletonColHeader {
+  height: 48px;
+  border-radius: 12px 12px 0 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-bottom: none;
+  animation: skeletonPulse 1.5s ease-in-out infinite;
+}
+
+[data-theme="light"] .skeletonColHeader {
+  opacity: 0.6;
+}
+
+.skeletonCard {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  animation: skeletonPulse 1.5s ease-in-out infinite;
+}
+
+[data-theme="light"] .skeletonCard {
+  opacity: 0.6;
+}
+
+.skeletonLine {
+  border-radius: 4px;
+  background: var(--border);
+}
+
+.skeletonTitle { height: 14px; width: 75%; }
+.skeletonDesc { height: 11px; width: 90%; }
+.skeletonDesc2 { height: 11px; width: 55%; }
+.skeletonMeta { height: 10px; width: 40%; margin-top: 4px; }
+
+@keyframes skeletonPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+/* Error state */
+.errorState {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 12px;
+  padding: 32px;
+  text-align: center;
+  min-height: calc(100vh - 200px);
+}
+
+.errorIcon {
+  font-size: 40px;
+}
+
+.errorTitle {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--red);
+}
+
+.errorMsg {
+  font-size: 13px;
+  color: var(--text-dim);
+  max-width: 360px;
+  line-height: 1.5;
+}
+
+.retryBtn {
+  margin-top: 6px;
+  padding: 9px 20px;
+  border-radius: 8px;
+  border: 1px solid var(--red);
+  background: rgba(225, 112, 85, 0.12);
+  color: var(--red);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.retryBtn:hover {
+  background: rgba(225, 112, 85, 0.25);
+}
+
+/* Drag placeholder */
+.dragPlaceholder {
+  height: 4px;
+  background: var(--accent);
+  border-radius: 4px;
+  margin: 2px 0;
+  box-shadow: 0 0 8px var(--accent-glow), 0 0 2px var(--accent);
+  animation: placeholderPulse 1s ease-in-out infinite;
+  pointer-events: none;
+}
+
+@keyframes placeholderPulse {
+  0%, 100% { opacity: 1; transform: scaleX(1); }
+  50% { opacity: 0.7; transform: scaleX(0.98); }
+}

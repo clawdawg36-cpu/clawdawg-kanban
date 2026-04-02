@@ -7,6 +7,7 @@ import { TaskProvider } from './contexts/TaskContext';
 import { ProjectProvider } from './contexts/ProjectContext';
 import { FilterProvider } from './contexts/FilterContext';
 import { NotificationProvider } from './contexts/NotificationContext';
+import { ToastProvider } from './components/layout/Toast';
 import App from './App';
 
 createRoot(document.getElementById('root')).render(
@@ -16,7 +17,9 @@ createRoot(document.getElementById('root')).render(
         <TaskProvider>
           <FilterProvider>
             <NotificationProvider>
-              <App />
+              <ToastProvider>
+                <App />
+              </ToastProvider>
             </NotificationProvider>
           </FilterProvider>
         </TaskProvider>

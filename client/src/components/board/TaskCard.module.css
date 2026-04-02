@@ -1,0 +1,296 @@
+.card {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px 16px;
+  cursor: grab;
+  transition: 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+}
+
+.card:hover {
+  border-color: rgba(108, 92, 231, 0.4);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+  transform: translateY(-1px);
+}
+
+[data-theme="light"] .card {
+  box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+}
+
+[data-theme="light"] .card:hover {
+  box-shadow: 0 4px 16px rgba(0,0,0,0.1);
+}
+
+.dragging {
+  opacity: 0.4;
+  transform: rotate(2deg);
+}
+
+.ideaCard {
+  border: 1.5px dashed #a29bfe;
+  opacity: 0.82;
+  background: rgba(162, 155, 254, 0.06);
+}
+
+[data-theme="light"] .ideaCard {
+  background: rgba(162, 155, 254, 0.08);
+}
+
+.ideaCard .cardTitle {
+  font-style: italic;
+  color: #b2aaff;
+}
+
+.overdueCard {
+  border-color: rgba(225, 112, 85, 0.4);
+  box-shadow: 0 0 0 1px rgba(225, 112, 85, 0.2) inset;
+}
+
+.overdueCard:hover {
+  border-color: rgba(225, 112, 85, 0.7);
+  box-shadow: 0 4px 16px rgba(225, 112, 85, 0.2);
+}
+
+.scheduledFuture {
+  opacity: 0.6;
+}
+
+.scheduledFuture:hover {
+  opacity: 0.85;
+}
+
+.blockedCard {
+  border-color: rgba(225, 112, 85, 0.4);
+}
+
+.archivedCard {
+  opacity: 0.55;
+  border-left: 3px solid var(--text-dim);
+}
+
+.archivedCard .cardTitle {
+  text-decoration: line-through;
+}
+
+/* Priority bar */
+.priorityBar {
+  position: absolute;
+  top: 0;
+  left: 16px;
+  width: 28px;
+  height: 3px;
+  border-radius: 0 0 3px 3px;
+}
+
+.priorityLow { background: var(--green); }
+.priorityMedium { background: var(--blue); }
+.priorityHigh { background: var(--orange); }
+.priorityUrgent { background: var(--red); }
+
+/* Priority badge */
+.priorityBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  padding: 2px 7px;
+  border-radius: 20px;
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  line-height: 1.4;
+}
+
+.priorityBadgeLow { background: rgba(0,184,148,0.15); color: var(--green); border: 1px solid rgba(0,184,148,0.3); }
+.priorityBadgeMedium { background: rgba(116,185,255,0.15); color: var(--blue); border: 1px solid rgba(116,185,255,0.3); }
+.priorityBadgeHigh { background: rgba(253,167,73,0.15); color: var(--orange); border: 1px solid rgba(253,167,73,0.3); }
+.priorityBadgeUrgent { background: rgba(225,112,85,0.15); color: var(--red); border: 1px solid rgba(225,112,85,0.3); }
+
+.cardTitle {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 6px;
+  line-height: 1.4;
+}
+
+.cardDesc {
+  font-size: 12px;
+  color: var(--text-dim);
+  line-height: 1.5;
+  margin-bottom: 10px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.cardTags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+
+.tag {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: rgba(108, 92, 231, 0.15);
+  color: #a29bfe;
+  font-weight: 500;
+}
+
+.cardMeta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.cardAssignee {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.avatar {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 10px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.avatarMike { background: linear-gradient(135deg, #6c5ce7, #a29bfe); }
+.avatarClawdawg { background: linear-gradient(135deg, #00b894, #55efc4); }
+.avatarDefault { background: linear-gradient(135deg, var(--text-dim), var(--border)); }
+
+.cardDate {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+/* Due date badge */
+.dueBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 6px;
+  margin-top: 8px;
+  margin-bottom: 2px;
+}
+
+.overdue {
+  background: rgba(225, 112, 85, 0.18);
+  color: var(--red);
+  border: 1px solid rgba(225, 112, 85, 0.4);
+  animation: pulseOverdue 2s ease-in-out infinite;
+}
+
+.dueSoon {
+  background: rgba(253, 203, 110, 0.15);
+  color: var(--orange);
+  border: 1px solid rgba(253, 203, 110, 0.35);
+}
+
+.onTime {
+  background: rgba(0, 184, 148, 0.12);
+  color: var(--green);
+  border: 1px solid rgba(0, 184, 148, 0.3);
+}
+
+@keyframes pulseOverdue {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+/* Scheduled badge */
+.scheduledBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 6px;
+  margin-top: 6px;
+  margin-bottom: 2px;
+  background: rgba(116, 185, 255, 0.15);
+  color: var(--blue);
+  border: 1px solid rgba(116, 185, 255, 0.35);
+}
+
+/* Recurring badge */
+.recurringBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: rgba(162, 155, 254, 0.15);
+  color: #a29bfe;
+  border: 1px solid rgba(162, 155, 254, 0.3);
+}
+
+/* Wave badge */
+.waveBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: rgba(116,185,255,0.15);
+  color: var(--blue);
+  border: 1px solid rgba(116,185,255,0.3);
+  margin-bottom: 4px;
+}
+
+/* Blocked banner */
+.blockedBanner {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 9px;
+  background: rgba(225, 112, 85, 0.12);
+  border: 1px solid rgba(225, 112, 85, 0.35);
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--red);
+  margin-bottom: 8px;
+}
+
+/* Subtask progress */
+.subtaskProgress {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-dim);
+  margin-top: 6px;
+}
+
+.allDone {
+  color: var(--green);
+}
+
+.badgeRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
