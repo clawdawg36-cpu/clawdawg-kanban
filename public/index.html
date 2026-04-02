@@ -3382,6 +3382,466 @@ kbd {
   font-size: 12px;
   color: var(--text-dim);
 }
+
+/* ═══ Feature 1: Peek Panel ═══════════════════════════════════════════════════ */
+.peek-panel {
+  position: fixed;
+  top: 0; right: 0;
+  width: 420px;
+  max-width: 100vw;
+  height: 100vh;
+  background: var(--surface);
+  border-left: 1px solid var(--border);
+  z-index: 90;
+  display: none;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: -4px 0 24px rgba(0,0,0,0.3);
+  transform: translateX(100%);
+  transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.peek-panel.open {
+  display: flex;
+  transform: translateX(0);
+}
+.peek-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  gap: 8px;
+}
+.peek-panel-header-actions {
+  display: flex;
+  gap: 6px;
+}
+.peek-btn {
+  padding: 7px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: var(--transition);
+}
+.peek-btn:hover { border-color: var(--accent); background: var(--accent-glow); color: #a29bfe; }
+.peek-btn.danger { border-color: rgba(225,112,85,0.4); color: var(--red); }
+.peek-btn.danger:hover { background: rgba(225,112,85,0.15); border-color: var(--red); }
+.peek-close-btn {
+  width: 32px; height: 32px;
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  color: var(--text-dim);
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 16px;
+  display: grid; place-items: center;
+  transition: var(--transition);
+}
+.peek-close-btn:hover { color: var(--text); border-color: var(--accent); }
+.peek-panel-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.peek-title {
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+.peek-desc {
+  font-size: 14px;
+  color: var(--text-dim);
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+.peek-field-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-dim);
+  margin-bottom: 6px;
+}
+.peek-field-value {
+  font-size: 14px;
+  color: var(--text);
+}
+.peek-meta-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+.peek-meta-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.peek-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.peek-blocked-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  background: rgba(225, 112, 85, 0.12);
+  border: 1px solid rgba(225, 112, 85, 0.35);
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--red);
+}
+.peek-subtask-bar {
+  width: 100%;
+  height: 6px;
+  background: var(--border);
+  border-radius: 3px;
+  overflow: hidden;
+  margin-top: 4px;
+}
+.peek-subtask-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.3s;
+}
+.peek-divider {
+  height: 1px;
+  background: var(--border);
+}
+
+/* Board content shrinks when peek is open */
+.app-content.peek-open .board,
+.app-content.peek-open .list-view-container,
+.app-content.peek-open .timeline-view-container {
+  margin-right: 420px;
+  transition: margin-right 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Mobile peek: bottom sheet */
+@media (max-width: 768px) {
+  .peek-panel {
+    top: auto; bottom: 0; left: 0; right: 0;
+    width: 100%;
+    height: 50vh;
+    max-height: 90vh;
+    border-left: none;
+    border-top: 1px solid var(--border);
+    border-radius: 20px 20px 0 0;
+    transform: translateY(100%);
+    box-shadow: 0 -4px 24px rgba(0,0,0,0.3);
+  }
+  .peek-panel.open {
+    transform: translateY(0);
+  }
+  .peek-panel.peek-full {
+    height: 90vh;
+  }
+  .app-content.peek-open .board,
+  .app-content.peek-open .list-view-container,
+  .app-content.peek-open .timeline-view-container {
+    margin-right: 0;
+  }
+  .peek-sheet-handle {
+    width: 40px; height: 4px;
+    border-radius: 2px;
+    background: rgba(255,255,255,0.25);
+    margin: 8px auto 0;
+    flex-shrink: 0;
+  }
+}
+
+/* Desktop: hide peek sheet handle */
+.peek-sheet-handle { display: none; }
+@media (max-width: 768px) {
+  .peek-sheet-handle { display: block; }
+}
+
+/* ═══ Feature 2: Micro-Animations ═════════════════════════════════════════════ */
+@keyframes cardEnter {
+  0% { opacity: 0; transform: scale(0.95); }
+  70% { transform: scale(1.02); }
+  100% { opacity: 1; transform: scale(1); }
+}
+.card-enter {
+  animation: cardEnter 0.35s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+@keyframes donePulse {
+  0% { box-shadow: 0 0 0 0 rgba(0, 184, 148, 0.5); }
+  50% { box-shadow: 0 0 16px 4px rgba(0, 184, 148, 0.3); }
+  100% { box-shadow: 0 0 0 0 rgba(0, 184, 148, 0); }
+}
+.card-done-pulse {
+  animation: donePulse 0.6s ease-out;
+}
+
+@keyframes cardDelete {
+  from { opacity: 1; transform: scale(1); }
+  to { opacity: 0; transform: scale(0.85); }
+}
+.card-deleting {
+  animation: cardDelete 0.25s ease-in forwards;
+  pointer-events: none;
+}
+
+/* ═══ Feature 3: Board Views ═════════════════════════════════════════════════ */
+.view-toggle-group {
+  display: flex;
+  gap: 2px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 2px;
+}
+.view-toggle-btn {
+  padding: 5px 12px;
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  border-radius: 6px;
+  transition: var(--transition);
+  white-space: nowrap;
+}
+.view-toggle-btn:hover { color: var(--text); }
+.view-toggle-btn.active {
+  background: var(--accent);
+  color: #fff;
+  box-shadow: 0 1px 4px var(--accent-glow);
+}
+
+/* List/Table View */
+.list-view-container {
+  display: none;
+  padding: 16px 32px;
+  min-height: calc(100vh - 160px);
+}
+.list-view-container.active { display: block; }
+.list-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+.list-table th {
+  text-align: left;
+  padding: 10px 14px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-dim);
+  border-bottom: 2px solid var(--border);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+  transition: color var(--transition);
+}
+.list-table th:hover { color: var(--text); }
+.list-table th .sort-arrow {
+  display: inline-block;
+  margin-left: 4px;
+  font-size: 10px;
+  opacity: 0.5;
+}
+.list-table th.sorted .sort-arrow { opacity: 1; color: var(--accent); }
+.list-table td {
+  padding: 10px 14px;
+  font-size: 13px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+.list-table tr {
+  cursor: pointer;
+  transition: background var(--transition);
+}
+.list-table tbody tr:hover {
+  background: var(--surface2);
+}
+.list-table .col-badge {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 5px;
+  background: var(--surface2);
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+}
+.list-table .list-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+
+/* Timeline View */
+.timeline-view-container {
+  display: none;
+  padding: 16px 32px;
+  min-height: calc(100vh - 160px);
+  overflow-x: auto;
+}
+.timeline-view-container.active { display: block; }
+.timeline-header {
+  display: flex;
+  border-bottom: 2px solid var(--border);
+  position: sticky;
+  top: 0;
+  background: var(--bg);
+  z-index: 2;
+}
+.timeline-header-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-dim);
+  text-align: center;
+  padding: 8px 0;
+  border-right: 1px solid var(--border);
+  min-width: 80px;
+  flex-shrink: 0;
+}
+.timeline-header-label.assignee-col {
+  min-width: 120px;
+  text-align: left;
+  padding-left: 10px;
+}
+.timeline-swimlane {
+  display: flex;
+  align-items: stretch;
+  min-height: 48px;
+  border-bottom: 1px solid var(--border);
+}
+.timeline-swimlane-label {
+  min-width: 120px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  font-size: 13px;
+  font-weight: 600;
+  border-right: 1px solid var(--border);
+  color: var(--text);
+}
+.timeline-row {
+  flex: 1;
+  position: relative;
+  min-height: 48px;
+}
+.timeline-bar {
+  position: absolute;
+  top: 8px;
+  height: 32px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #fff;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: opacity var(--transition), box-shadow var(--transition);
+  min-width: 24px;
+}
+.timeline-bar:hover {
+  opacity: 0.85;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+}
+.timeline-bar.col-idea { background: #a29bfe; }
+.timeline-bar.col-backlog { background: var(--text-dim); }
+.timeline-bar.col-in-progress { background: var(--blue); }
+.timeline-bar.col-in-review { background: var(--orange); }
+.timeline-bar.col-done { background: var(--green); }
+.timeline-no-dates {
+  padding: 32px;
+  text-align: center;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+@media (max-width: 768px) {
+  .view-toggle-group { display: none; }
+  .list-view-container { padding: 12px 16px; }
+  .list-table th, .list-table td { padding: 8px 10px; font-size: 12px; }
+  .timeline-view-container { padding: 12px 16px; }
+}
+
+/* ═══ Feature 4: Command Palette (expanded) ═══════════════════════════════════ */
+.qs-item .qs-col-badge {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 5px;
+  background: var(--surface2);
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.qs-item .qs-action-icon {
+  font-size: 16px;
+  width: 24px;
+  text-align: center;
+  flex-shrink: 0;
+}
+.qs-section-label {
+  padding: 6px 16px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+  background: var(--surface2);
+}
+
+/* ═══ Feature 5: Mobile Swipe Gestures ════════════════════════════════════════ */
+.card-swipe-wrapper {
+  position: relative;
+  overflow: hidden;
+  border-radius: 10px;
+}
+.card-swipe-bg {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  font-size: 13px;
+  font-weight: 700;
+  color: #fff;
+  padding: 0 20px;
+  opacity: 0;
+  transition: opacity 0.15s;
+  pointer-events: none;
+  border-radius: 10px;
+}
+.card-swipe-bg.swipe-right {
+  background: var(--green);
+  justify-content: flex-start;
+}
+.card-swipe-bg.swipe-left {
+  background: var(--orange);
+  justify-content: flex-end;
+}
+.card-swipe-bg.swipe-done {
+  background: #00d2a0;
+  justify-content: flex-start;
+}
+.card-swipe-bg.visible { opacity: 1; }
 </style>
 </head>
 <body>
@@ -3430,6 +3890,11 @@ kbd {
           <div class="notif-empty">No activity yet</div>
         </div>
       </div>
+    </div>
+    <div class="view-toggle-group" id="viewToggleGroup">
+      <button class="view-toggle-btn active" data-view="board" title="Board view">Board</button>
+      <button class="view-toggle-btn" data-view="list" title="List view">List</button>
+      <button class="view-toggle-btn" data-view="timeline" title="Timeline view">Timeline</button>
     </div>
     <button class="select-mode-btn" id="selectModeBtn" title="Toggle card selection mode">☑ Select</button>
     <button class="filter-btn" id="statsBtn">📊 Stats</button>
@@ -3583,6 +4048,39 @@ kbd {
     </div>
     <div class="card-list" data-col="done"></div>
   </div>
+</div>
+
+<!-- List Table View -->
+<div class="list-view-container" id="listViewContainer">
+  <table class="list-table" id="listTable">
+    <thead>
+      <tr>
+        <th data-sort="title">Title <span class="sort-arrow">▲</span></th>
+        <th data-sort="assignee">Assignee <span class="sort-arrow">▲</span></th>
+        <th data-sort="priority">Priority <span class="sort-arrow">▲</span></th>
+        <th data-sort="column">Status <span class="sort-arrow">▲</span></th>
+        <th data-sort="dueDate">Due Date <span class="sort-arrow">▲</span></th>
+        <th data-sort="tags">Tags <span class="sort-arrow">▲</span></th>
+      </tr>
+    </thead>
+    <tbody id="listTableBody"></tbody>
+  </table>
+</div>
+
+<!-- Timeline View -->
+<div class="timeline-view-container" id="timelineViewContainer"></div>
+
+<!-- Peek Panel -->
+<div class="peek-panel" id="peekPanel">
+  <div class="peek-sheet-handle" id="peekSheetHandle"></div>
+  <div class="peek-panel-header">
+    <div class="peek-panel-header-actions">
+      <button class="peek-btn" id="peekEditBtn">✏️ Edit</button>
+      <button class="peek-btn danger" id="peekDeleteBtn">🗑 Delete</button>
+    </div>
+    <button class="peek-close-btn" id="peekCloseBtn" title="Close (Esc)">✕</button>
+  </div>
+  <div class="peek-panel-body" id="peekPanelBody"></div>
 </div>
 
 <button class="fab" id="fabBtn" aria-label="Add task">+</button>
@@ -6988,6 +7486,523 @@ loadTasks();
 loadNotifications();
 connectSSE();
 
+// ═══ Feature 1: Peek Panel ═══════════════════════════════════════════════════
+let peekTaskId = null;
+
+function openPeek(taskId) {
+  const task = tasks.find(t => t.id === taskId);
+  if (!task) return;
+  peekTaskId = taskId;
+  const panel = document.getElementById('peekPanel');
+  const body = document.getElementById('peekPanelBody');
+  const appContent = document.getElementById('appContent');
+
+  // Build peek content
+  const avatarClass = task.assignee === 'Mike' ? 'mike' : 'clawdawg';
+  const initials = task.assignee === 'Mike' ? 'M' : 'CD';
+  const date = new Date(task.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+
+  const blocked = isBlocked(task.id);
+  const activeBlockerIds = getBlockerIds(task.id).filter(bid => { const b = tasks.find(x => x.id === bid); return b && b.column !== 'done'; });
+
+  let subtaskHTML = '';
+  if (Array.isArray(task.subtasks) && task.subtasks.length > 0) {
+    const total = task.subtasks.length;
+    const done = task.subtasks.filter(s => s.done).length;
+    const pct = Math.round((done / total) * 100);
+    subtaskHTML = `<div class="peek-meta-item" style="grid-column:1/-1">
+      <div class="peek-field-label">Subtasks</div>
+      <div class="peek-field-value">☑ ${done}/${total}</div>
+      <div class="peek-subtask-bar"><div class="peek-subtask-fill" style="width:${pct}%;background:${done===total?'var(--green)':'var(--accent)'}"></div></div>
+    </div>`;
+  }
+
+  body.innerHTML = `
+    <div class="peek-title">${esc(task.title)}</div>
+    ${task.description ? `<div class="peek-desc">${esc(task.description)}</div>` : ''}
+    ${blocked ? `<div class="peek-blocked-banner">🔒 Blocked by ${activeBlockerIds.length} card${activeBlockerIds.length !== 1 ? 's' : ''}</div>` : ''}
+    <div class="peek-divider"></div>
+    <div class="peek-meta-grid">
+      <div class="peek-meta-item">
+        <div class="peek-field-label">Assignee</div>
+        <div class="peek-field-value" style="display:flex;align-items:center;gap:6px"><span class="avatar ${avatarClass}">${initials}</span>${esc(task.assignee)}</div>
+      </div>
+      <div class="peek-meta-item">
+        <div class="peek-field-label">Priority</div>
+        <div class="peek-field-value"><span class="priority-badge ${task.priority}">${{urgent:'🔴 Urgent',high:'🟠 High',medium:'🟡 Medium',low:'🟢 Low'}[task.priority]||esc(task.priority)}</span></div>
+      </div>
+      <div class="peek-meta-item">
+        <div class="peek-field-label">Status</div>
+        <div class="peek-field-value">${COL_LABELS[task.column] || task.column}</div>
+      </div>
+      <div class="peek-meta-item">
+        <div class="peek-field-label">Created</div>
+        <div class="peek-field-value">${date}</div>
+      </div>
+      ${task.dueDate ? `<div class="peek-meta-item"><div class="peek-field-label">Due Date</div><div class="peek-field-value">${dueBadgeHTML(task.dueDate)}</div></div>` : ''}
+      ${task.startAfter && friendlyStartAfter(task.startAfter) ? `<div class="peek-meta-item"><div class="peek-field-label">Scheduled</div><div class="peek-field-value"><div class="scheduled-badge">${friendlyStartAfter(task.startAfter)}</div></div></div>` : ''}
+      ${task.recurring ? `<div class="peek-meta-item"><div class="peek-field-label">Recurring</div><div class="peek-field-value"><div class="recurring-badge">🔄 ${esc(task.recurring)}</div></div></div>` : ''}
+      ${task.wave != null ? `<div class="peek-meta-item"><div class="peek-field-label">Wave</div><div class="peek-field-value"><div class="wave-badge">⚡ Wave ${task.wave}</div></div></div>` : ''}
+      ${subtaskHTML}
+    </div>
+    ${(task.tags && task.tags.length) ? `<div class="peek-divider"></div><div><div class="peek-field-label">Tags</div><div class="peek-badges">${task.tags.map(t => `<span class="tag">${esc(t)}</span>`).join('')}</div></div>` : ''}
+  `;
+
+  panel.classList.add('open');
+  // Force reflow then animate
+  panel.offsetHeight;
+  appContent.classList.add('peek-open');
+}
+
+function closePeek() {
+  const panel = document.getElementById('peekPanel');
+  const appContent = document.getElementById('appContent');
+  panel.classList.remove('open');
+  appContent.classList.remove('peek-open');
+  peekTaskId = null;
+}
+
+// ═══ Feature 2: Micro-Animations ═════════════════════════════════════════════
+// Track newly rendered card IDs for enter animation
+let _animateNewCards = new Set();
+let _prevDoneIds = new Set();
+
+function trackDoneIds() {
+  _prevDoneIds = new Set(tasks.filter(t => t.column === 'done').map(t => t.id));
+}
+
+function applyCardAnimations() {
+  // Card enter animations
+  if (_animateNewCards.size > 0) {
+    _animateNewCards.forEach(id => {
+      const el = document.querySelector(`.card[data-id="${id}"]`);
+      if (el) el.classList.add('card-enter');
+    });
+    _animateNewCards.clear();
+  }
+
+  // Done column pulse
+  const currentDoneIds = new Set(tasks.filter(t => t.column === 'done').map(t => t.id));
+  currentDoneIds.forEach(id => {
+    if (!_prevDoneIds.has(id)) {
+      const el = document.querySelector(`.card[data-id="${id}"]`);
+      if (el) {
+        el.classList.add('card-done-pulse');
+        el.addEventListener('animationend', () => el.classList.remove('card-done-pulse'), { once: true });
+      }
+    }
+  });
+  _prevDoneIds = currentDoneIds;
+}
+
+// ═══ Feature 3: Board Views ═════════════════════════════════════════════════
+let currentView = localStorage.getItem('kanban-view') || 'board';
+let listSortCol = 'title';
+let listSortAsc = true;
+
+function switchView(view) {
+  currentView = view;
+  localStorage.setItem('kanban-view', view);
+
+  // Update toggle buttons
+  document.querySelectorAll('.view-toggle-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.view === view);
+  });
+
+  // Show/hide containers
+  const boardEl = document.querySelector('.board');
+  const listEl = document.getElementById('listViewContainer');
+  const timelineEl = document.getElementById('timelineViewContainer');
+  const mobileNav = document.getElementById('mobileNav');
+
+  if (boardEl) boardEl.style.display = view === 'board' ? '' : 'none';
+  if (listEl) listEl.classList.toggle('active', view === 'list');
+  if (timelineEl) timelineEl.classList.toggle('active', view === 'timeline');
+  if (mobileNav) mobileNav.style.display = view === 'board' ? '' : 'none';
+
+  if (view === 'list') renderListView();
+  if (view === 'timeline') renderTimeline();
+}
+
+function renderListView() {
+  const tbody = document.getElementById('listTableBody');
+  if (!tbody) return;
+  let filtered = tasks.filter(t => matchesSearch(t));
+
+  // Sort
+  const PRIORITY_SORT = { urgent: 0, high: 1, medium: 2, low: 3 };
+  const COL_SORT_ORDER = { idea: 0, backlog: 1, 'in-progress': 2, 'in-review': 3, done: 4 };
+
+  filtered.sort((a, b) => {
+    let valA, valB;
+    switch (listSortCol) {
+      case 'title': valA = (a.title || '').toLowerCase(); valB = (b.title || '').toLowerCase(); break;
+      case 'assignee': valA = (a.assignee || '').toLowerCase(); valB = (b.assignee || '').toLowerCase(); break;
+      case 'priority': valA = PRIORITY_SORT[a.priority] ?? 9; valB = PRIORITY_SORT[b.priority] ?? 9; break;
+      case 'column': valA = COL_SORT_ORDER[a.column] ?? 9; valB = COL_SORT_ORDER[b.column] ?? 9; break;
+      case 'dueDate': valA = a.dueDate || '9999'; valB = b.dueDate || '9999'; break;
+      case 'tags': valA = (a.tags || []).join(',').toLowerCase(); valB = (b.tags || []).join(',').toLowerCase(); break;
+      default: valA = ''; valB = '';
+    }
+    if (valA < valB) return listSortAsc ? -1 : 1;
+    if (valA > valB) return listSortAsc ? 1 : -1;
+    return 0;
+  });
+
+  tbody.innerHTML = filtered.map(t => {
+    const dueDateStr = t.dueDate ? new Date(t.dueDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '—';
+    const tags = (t.tags || []).map(tag => `<span class="tag">${esc(tag)}</span>`).join('');
+    return `<tr data-action="listRowClick" data-task-id="${t.id}">
+      <td style="font-weight:600">${esc(t.title)}</td>
+      <td>${esc(t.assignee)}</td>
+      <td><span class="priority-badge ${t.priority}">${t.priority}</span></td>
+      <td><span class="col-badge">${COL_LABELS[t.column] || t.column}</span></td>
+      <td>${dueDateStr}</td>
+      <td><div class="list-tags">${tags}</div></td>
+    </tr>`;
+  }).join('');
+
+  // Update sort arrows
+  document.querySelectorAll('.list-table th').forEach(th => {
+    const col = th.dataset.sort;
+    const arrow = th.querySelector('.sort-arrow');
+    if (col === listSortCol) {
+      th.classList.add('sorted');
+      if (arrow) arrow.textContent = listSortAsc ? '▲' : '▼';
+    } else {
+      th.classList.remove('sorted');
+      if (arrow) arrow.textContent = '▲';
+    }
+  });
+}
+
+function renderTimeline() {
+  const container = document.getElementById('timelineViewContainer');
+  if (!container) return;
+
+  const filtered = tasks.filter(t => matchesSearch(t) && (t.startAfter || t.dueDate));
+  if (!filtered.length) {
+    container.innerHTML = '<div class="timeline-no-dates">No tasks with dates to display. Add startAfter or dueDate to tasks to see them here.</div>';
+    return;
+  }
+
+  // Find date range
+  const allDates = [];
+  filtered.forEach(t => {
+    if (t.startAfter) allDates.push(new Date(t.startAfter));
+    if (t.dueDate) allDates.push(new Date(t.dueDate + 'T23:59:59'));
+  });
+  let minDate = new Date(Math.min(...allDates));
+  let maxDate = new Date(Math.max(...allDates));
+
+  // Pad by 1 day on each side
+  minDate.setDate(minDate.getDate() - 1);
+  maxDate.setDate(maxDate.getDate() + 1);
+
+  // Generate day columns
+  const days = [];
+  const cursor = new Date(minDate);
+  cursor.setHours(0,0,0,0);
+  const maxEnd = new Date(maxDate);
+  maxEnd.setHours(0,0,0,0);
+  while (cursor <= maxEnd) {
+    days.push(new Date(cursor));
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  if (days.length > 60) days.length = 60; // cap at 60 days
+
+  const totalDays = days.length;
+  const dayWidth = 80; // px per day
+
+  // Group by assignee
+  const byAssignee = {};
+  filtered.forEach(t => {
+    const key = t.assignee || 'Unassigned';
+    if (!byAssignee[key]) byAssignee[key] = [];
+    byAssignee[key].push(t);
+  });
+
+  const startMs = days[0].getTime();
+  const msPerDay = 86400000;
+
+  // Build header
+  let html = `<div class="timeline-header" style="min-width:${120 + totalDays * dayWidth}px">
+    <div class="timeline-header-label assignee-col">Assignee</div>
+    ${days.map(d => `<div class="timeline-header-label" style="min-width:${dayWidth}px">${d.toLocaleDateString('en-US',{month:'short',day:'numeric'})}</div>`).join('')}
+  </div>`;
+
+  // Build swimlanes
+  Object.entries(byAssignee).forEach(([assignee, assigneeTasks]) => {
+    html += `<div class="timeline-swimlane" style="min-width:${120 + totalDays * dayWidth}px">
+      <div class="timeline-swimlane-label"><span class="avatar ${assignee==='Mike'?'mike':'clawdawg'}">${assignee==='Mike'?'M':'CD'}</span>${esc(assignee)}</div>
+      <div class="timeline-row" style="width:${totalDays * dayWidth}px">`;
+    assigneeTasks.forEach(t => {
+      const taskStart = t.startAfter ? new Date(t.startAfter) : (t.dueDate ? new Date(t.dueDate) : null);
+      const taskEnd = t.dueDate ? new Date(t.dueDate + 'T23:59:59') : (t.startAfter ? new Date(new Date(t.startAfter).getTime() + msPerDay) : null);
+      if (!taskStart || !taskEnd) return;
+
+      const leftPx = Math.max(0, ((taskStart.getTime() - startMs) / msPerDay) * dayWidth);
+      const widthPx = Math.max(dayWidth * 0.5, ((taskEnd.getTime() - taskStart.getTime()) / msPerDay) * dayWidth);
+
+      html += `<div class="timeline-bar col-${t.column}" style="left:${leftPx}px;width:${widthPx}px" data-action="timelineBarClick" data-task-id="${t.id}" title="${esc(t.title)}">${esc(t.title)}</div>`;
+    });
+    html += `</div></div>`;
+  });
+
+  container.innerHTML = html;
+}
+
+// ═══ Feature 4: Command Palette (expanded) ═══════════════════════════════════
+let cpMode = 'search'; // 'search' | 'action'
+let cpResults = [];
+
+function renderCommandPalette(query) {
+  const q = (query || '').trim();
+  const list = document.getElementById('qsList');
+
+  if (q.startsWith('>')) {
+    // Action mode
+    cpMode = 'action';
+    const actionQ = q.slice(1).trim().toLowerCase();
+    const actions = [
+      { name: 'New task', icon: '➕', fn: () => { closeQuickSwitcher(); openModal(); } },
+      { name: 'Toggle theme', icon: '🌓', fn: () => { closeQuickSwitcher(); document.getElementById('themeToggleBtn').click(); } },
+      { name: 'Open stats', icon: '📊', fn: () => { closeQuickSwitcher(); openStats(); } },
+      { name: 'Reset filters', icon: '🔄', fn: () => { closeQuickSwitcher(); resetSearch(); } },
+      { name: 'Switch to board view', icon: '📋', fn: () => { closeQuickSwitcher(); switchView('board'); } },
+      { name: 'Switch to list view', icon: '📃', fn: () => { closeQuickSwitcher(); switchView('list'); } },
+      { name: 'Switch to timeline view', icon: '📅', fn: () => { closeQuickSwitcher(); switchView('timeline'); } },
+    ];
+    cpResults = actionQ ? actions.filter(a => a.name.toLowerCase().includes(actionQ)) : actions;
+
+    if (!cpResults.length) {
+      list.innerHTML = '<div class="qs-empty">No matching actions</div>';
+      return;
+    }
+    list.innerHTML = '<div class="qs-section-label">Actions</div>' +
+      cpResults.map((a, i) => `<div class="qs-item${i === qsFocusIndex ? ' focused' : ''}" data-idx="${i}" data-action="selectQuickSwitcher" data-qs-idx="${i}">
+        <span class="qs-action-icon">${a.icon}</span>
+        <span class="qs-name">${esc(a.name)}</span>
+      </div>`).join('');
+    return;
+  }
+
+  cpMode = 'search';
+  const lq = q.toLowerCase();
+
+  // Search tasks (fuzzy match on title, description, tags)
+  let taskResults = [];
+  if (lq) {
+    taskResults = tasks.filter(t => {
+      if (t.title && t.title.toLowerCase().includes(lq)) return true;
+      if (t.description && t.description.toLowerCase().includes(lq)) return true;
+      if ((t.tags || []).some(tag => tag.toLowerCase().includes(lq))) return true;
+      return false;
+    }).slice(0, 8);
+  }
+
+  // Search projects
+  const projectResults = lq
+    ? projects.filter(p => p.name.toLowerCase().includes(lq) || (p.emoji && p.emoji.includes(lq)))
+    : [...projects];
+
+  cpResults = [];
+  let html = '';
+
+  if (taskResults.length) {
+    html += '<div class="qs-section-label">Tasks</div>';
+    taskResults.forEach((t, i) => {
+      cpResults.push({ type: 'task', task: t });
+      const idx = cpResults.length - 1;
+      html += `<div class="qs-item${idx === qsFocusIndex ? ' focused' : ''}" data-idx="${idx}" data-action="selectQuickSwitcher" data-qs-idx="${idx}">
+        <span class="qs-emoji">📝</span>
+        <span class="qs-name">${esc(t.title)}</span>
+        <span class="qs-col-badge">${COL_LABELS[t.column] || t.column}</span>
+      </div>`;
+    });
+  }
+
+  if (projectResults.length) {
+    html += '<div class="qs-section-label">Projects</div>';
+    projectResults.forEach((p) => {
+      cpResults.push({ type: 'project', project: p });
+      const idx = cpResults.length - 1;
+      const isActive = p.id === activeProjectId;
+      html += `<div class="qs-item${idx === qsFocusIndex ? ' focused' : ''}" data-idx="${idx}" data-action="selectQuickSwitcher" data-qs-idx="${idx}">
+        <span class="qs-emoji">${p.emoji || '📋'}</span>
+        <span class="qs-name">${esc(p.name)}</span>
+        ${isActive ? '<span class="qs-active-badge">current</span>' : ''}
+      </div>`;
+    });
+  }
+
+  if (!html) {
+    list.innerHTML = '<div class="qs-empty">No results found</div>';
+    return;
+  }
+  list.innerHTML = html;
+}
+
+// Override selectQuickSwitcher to handle task and action results
+function selectQuickSwitcherExpanded(idx) {
+  if (cpMode === 'action') {
+    const action = cpResults[idx];
+    if (action && action.fn) action.fn();
+    return;
+  }
+
+  const item = cpResults[idx];
+  if (!item) return;
+
+  if (item.type === 'task') {
+    closeQuickSwitcher();
+    openPeek(item.task.id);
+  } else if (item.type === 'project') {
+    closeQuickSwitcher();
+    switchProject(item.project.id);
+  }
+}
+
+// ═══ Feature 5: Mobile Swipe Gestures on Cards ══════════════════════════════
+function initMobileSwipeGestures() {
+  if (!isMobile()) return;
+
+  let swipeCard = null;
+  let swipeStartX = 0;
+  let swipeStartY = 0;
+  let swipeActive = false;
+  let swipeBg = null;
+  let lastVibrated = 0;
+
+  document.addEventListener('touchstart', function(e) {
+    if (!isMobile()) return;
+    if (selectMode) return;
+    const card = e.target.closest('.card');
+    if (!card || card.classList.contains('archived-card')) return;
+    // Don't intercept if touching a button inside the card
+    if (e.target.closest('button, input, select, a')) return;
+
+    swipeCard = card;
+    swipeStartX = e.touches[0].clientX;
+    swipeStartY = e.touches[0].clientY;
+    swipeActive = false;
+    lastVibrated = 0;
+  }, { passive: true });
+
+  document.addEventListener('touchmove', function(e) {
+    if (!swipeCard || !isMobile()) return;
+    const dx = e.touches[0].clientX - swipeStartX;
+    const dy = e.touches[0].clientY - swipeStartY;
+
+    // Require >50px horizontal and horizontal > vertical to activate
+    if (!swipeActive) {
+      if (Math.abs(dx) < 50 || Math.abs(dy) > Math.abs(dx)) return;
+      swipeActive = true;
+      // Create swipe background
+      if (swipeBg) swipeBg.remove();
+      swipeBg = document.createElement('div');
+      swipeBg.className = 'card-swipe-bg';
+      swipeBg.style.position = 'absolute';
+      swipeBg.style.inset = '0';
+      swipeBg.style.zIndex = '-1';
+      swipeCard.style.position = 'relative';
+      swipeCard.style.zIndex = '1';
+      swipeCard.appendChild(swipeBg);
+    }
+
+    if (!swipeActive) return;
+    e.preventDefault();
+
+    const taskId = swipeCard.dataset.id;
+    const task = tasks.find(t => t.id === taskId);
+    if (!task) return;
+
+    const colIdx = COL_ORDER.indexOf(task.column);
+    let targetCol = '';
+    let bgClass = '';
+
+    if (dx > 200) {
+      // Long swipe right -> Done
+      targetCol = 'done';
+      bgClass = 'swipe-done';
+    } else if (dx > 50) {
+      // Short swipe right -> next column
+      if (colIdx < COL_ORDER.length - 1) {
+        targetCol = COL_ORDER[colIdx + 1];
+        bgClass = 'swipe-right';
+      }
+    } else if (dx < -50) {
+      // Swipe left -> previous column
+      if (colIdx > 0) {
+        targetCol = COL_ORDER[colIdx - 1];
+        bgClass = 'swipe-left';
+      }
+    }
+
+    // Update visual
+    swipeBg.className = 'card-swipe-bg';
+    if (targetCol && bgClass) {
+      swipeBg.classList.add(bgClass, 'visible');
+      swipeBg.textContent = COL_LABELS[targetCol] || targetCol;
+    }
+
+    // Translate the card
+    swipeCard.style.transform = `translateX(${dx}px)`;
+    swipeCard.style.transition = 'none';
+
+    // Vibrate on threshold cross
+    const absDx = Math.abs(dx);
+    if (absDx >= 50 && lastVibrated < 50) {
+      if (navigator.vibrate) navigator.vibrate(10);
+      lastVibrated = 50;
+    }
+    if (absDx >= 200 && lastVibrated < 200) {
+      if (navigator.vibrate) navigator.vibrate(10);
+      lastVibrated = 200;
+    }
+  }, { passive: false });
+
+  document.addEventListener('touchend', function(e) {
+    if (!swipeCard || !swipeActive || !isMobile()) {
+      swipeCard = null;
+      swipeActive = false;
+      return;
+    }
+
+    const dx = e.changedTouches[0].clientX - swipeStartX;
+    const taskId = swipeCard.dataset.id;
+    const task = tasks.find(t => t.id === taskId);
+
+    // Reset card position
+    swipeCard.style.transition = 'transform 0.2s ease';
+    swipeCard.style.transform = '';
+    if (swipeBg) { swipeBg.remove(); swipeBg = null; }
+
+    if (task) {
+      const colIdx = COL_ORDER.indexOf(task.column);
+
+      if (dx > 200) {
+        // Long swipe -> Done
+        moveTask(taskId, 'done');
+      } else if (dx > 50 && colIdx < COL_ORDER.length - 1) {
+        moveTask(taskId, COL_ORDER[colIdx + 1]);
+      } else if (dx < -50 && colIdx > 0) {
+        moveTask(taskId, COL_ORDER[colIdx - 1]);
+      }
+    }
+
+    setTimeout(() => {
+      if (swipeCard) {
+        swipeCard.style.transition = '';
+        swipeCard.style.position = '';
+        swipeCard.style.zIndex = '';
+      }
+      swipeCard = null;
+      swipeActive = false;
+    }, 200);
+  }, { passive: true });
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // EVENT LISTENERS — All handlers registered via addEventListener (CSP-safe)
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -7091,6 +8106,122 @@ document.addEventListener('DOMContentLoaded', function() {
   });
   document.getElementById('kbdOverlay').addEventListener('click', function(e) {
     if (e.target === this) closeKbdOverlay();
+  });
+
+  // ─── Feature 3: View Toggle ─────────────────────────────────────────────
+  document.querySelectorAll('.view-toggle-btn').forEach(btn => {
+    btn.addEventListener('click', function() {
+      switchView(this.dataset.view);
+    });
+  });
+  // Initialize view on load
+  switchView(currentView);
+
+  // ─── Feature 1: Peek Panel wiring ─────────────────────────────────────────
+  document.getElementById('peekCloseBtn').addEventListener('click', closePeek);
+  document.getElementById('peekEditBtn').addEventListener('click', function() {
+    if (peekTaskId) { closePeek(); editTask(peekTaskId); }
+  });
+  document.getElementById('peekDeleteBtn').addEventListener('click', function() {
+    if (peekTaskId) { const id = peekTaskId; closePeek(); deleteTask(id); }
+  });
+  // Mobile peek flick up/down
+  (function() {
+    const panel = document.getElementById('peekPanel');
+    const handle = document.getElementById('peekSheetHandle');
+    let startY = 0, dragging = false;
+    handle.addEventListener('touchstart', function(e) {
+      startY = e.touches[0].clientY;
+      dragging = true;
+    }, { passive: true });
+    document.addEventListener('touchmove', function(e) {
+      if (!dragging) return;
+      const dy = e.touches[0].clientY - startY;
+      if (dy < -30) { panel.classList.add('peek-full'); dragging = false; }
+      else if (dy > 50) { closePeek(); panel.classList.remove('peek-full'); dragging = false; }
+    }, { passive: true });
+    document.addEventListener('touchend', function() { dragging = false; }, { passive: true });
+  })();
+
+  // ─── Feature 5: Initialize mobile swipe gestures ──────────────────────────
+  initMobileSwipeGestures();
+
+  // ─── Feature 4: Override quick switcher with command palette ───────────────
+  (function() {
+    // Override renderQuickSwitcher
+    const origOpen = openQuickSwitcher;
+    window.openQuickSwitcher = function() {
+      const qs = document.getElementById('quickSwitcher');
+      const input = document.getElementById('qsInput');
+      qs.classList.add('open');
+      input.value = '';
+      input.placeholder = 'Search tasks, projects, or type > for actions...';
+      qsFocusIndex = 0;
+      cpMode = 'search';
+      cpResults = [];
+      renderCommandPalette('');
+      setTimeout(function() {
+        const panel = document.querySelector('.qs-panel');
+        if (panel) trapFocus(panel);
+      }, 50);
+    };
+
+    // Override the input handler
+    const qsInput = document.getElementById('qsInput');
+    // Remove old listener by cloning
+    const newInput = qsInput.cloneNode(true);
+    qsInput.parentNode.replaceChild(newInput, qsInput);
+
+    newInput.addEventListener('input', function(e) {
+      qsFocusIndex = 0;
+      renderCommandPalette(e.target.value);
+    });
+    newInput.addEventListener('keydown', function(e) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        qsFocusIndex = Math.min(qsFocusIndex + 1, cpResults.length - 1);
+        renderCommandPalette(newInput.value);
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        qsFocusIndex = Math.max(qsFocusIndex - 1, 0);
+        renderCommandPalette(newInput.value);
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        selectQuickSwitcherExpanded(qsFocusIndex);
+      } else if (e.key === 'Escape') {
+        closeQuickSwitcher();
+      }
+    });
+
+    // Override selectQuickSwitcher globally
+    window.selectQuickSwitcher = selectQuickSwitcherExpanded;
+  })();
+
+  // ─── Feature 2 & 3: Hook render for animations and alt views ──────────────
+  (function() {
+    const _origRender2 = window.render;
+    window.render = function() {
+      trackDoneIds();
+      _origRender2.apply(this, arguments);
+      applyCardAnimations();
+      // Update alternative views if active
+      if (currentView === 'list') renderListView();
+      if (currentView === 'timeline') renderTimeline();
+    };
+  })();
+
+  // ─── Feature 3: List table sort click handler ─────────────────────────────
+  document.querySelectorAll('.list-table th[data-sort]').forEach(th => {
+    th.addEventListener('click', function() {
+      const col = this.dataset.sort;
+      if (listSortCol === col) {
+        listSortAsc = !listSortAsc;
+      } else {
+        listSortCol = col;
+        listSortAsc = true;
+      }
+      renderListView();
+    });
   });
 
   // ─── Mobile filter bar collapse/expand toggle ───────────────────────────
@@ -7210,7 +8341,25 @@ document.addEventListener('DOMContentLoaded', function() {
       case 'selectQuickSwitcher':
         selectQuickSwitcher(parseInt(el.dataset.qsIdx, 10));
         break;
+      case 'listRowClick':
+        openPeek(taskId);
+        break;
+      case 'timelineBarClick':
+        openPeek(taskId);
+        break;
     }
+  });
+
+  // Card click -> open peek panel (if not in select mode, not clicking a button)
+  document.body.addEventListener('click', function(e) {
+    // Don't open peek if clicking a button, link, input, or action element inside the card
+    if (e.target.closest('[data-action]')) return;
+    if (e.target.closest('button, a, input, select')) return;
+    const card = e.target.closest('.card');
+    if (!card) return;
+    if (selectMode) return;
+    const id = card.dataset.id;
+    if (id) openPeek(id);
   });
 
   // Delegated change handler for dynamic checkboxes
