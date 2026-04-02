@@ -5,7 +5,7 @@ import { useNotifications } from '../../contexts/NotificationContext';
 import { useTheme } from '../../contexts/ThemeContext';
 import styles from './Header.module.css';
 
-export default function Header({ onToggleSidebar, onToggleStats, activeView, onViewChange }) {
+export default function Header({ onToggleSidebar, onToggleStats, activeView, onViewChange, onAddTask }) {
   const { activeProject } = useProjects();
   const { setSearchQuery } = useFilters();
   const { unreadCount } = useNotifications();
@@ -81,6 +81,11 @@ export default function Header({ onToggleSidebar, onToggleStats, activeView, onV
         >
           &#128202; Stats
         </button>
+        {onAddTask && (
+          <button className={styles.btnAdd} onClick={onAddTask}>
+            + New Task
+          </button>
+        )}
       </div>
     </header>
   );

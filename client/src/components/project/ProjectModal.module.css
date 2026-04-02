@@ -1,0 +1,223 @@
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
+  display: grid;
+  place-items: center;
+  z-index: 200;
+}
+
+.modal {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 28px;
+  width: 400px;
+  max-width: 90vw;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  animation: modalIn 0.25s ease;
+}
+
+@keyframes modalIn {
+  from { opacity: 0; transform: translateY(16px) scale(0.97); }
+  to { opacity: 1; transform: none; }
+}
+
+.title {
+  font-size: 18px;
+  font-weight: 700;
+  margin-bottom: 20px;
+  background: linear-gradient(135deg, #e4e6ef, #a29bfe);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.field {
+  margin-bottom: 14px;
+}
+
+.field label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-dim);
+  margin-bottom: 5px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.field input,
+.field textarea {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 14px;
+  transition: 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  outline: none;
+}
+
+.field input:focus,
+.field textarea:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-glow);
+}
+
+.colorSwatches {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.colorSwatch {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  transition: 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.colorSwatch:hover {
+  transform: scale(1.15);
+}
+
+.colorSwatchSelected {
+  composes: colorSwatch;
+  border-color: #fff;
+  box-shadow: 0 0 0 3px var(--accent);
+}
+
+.emojiOptions {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.emojiOption {
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  border: 2px solid var(--border);
+  background: var(--surface2);
+  font-size: 20px;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  transition: 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.emojiOption:hover {
+  border-color: var(--accent);
+  transform: scale(1.1);
+}
+
+.emojiOptionSelected {
+  composes: emojiOption;
+  border-color: var(--accent);
+  background: var(--accent-glow);
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+.agentConfig {
+  display: flex;
+  gap: 8px;
+}
+
+.agentConfig > div {
+  flex: 1;
+}
+
+.agentConfig label {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-bottom: 4px;
+  display: block;
+}
+
+.agentConfig input {
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13px;
+  outline: none;
+}
+
+.agentConfig input:focus {
+  border-color: var(--accent);
+}
+
+.actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.rightActions {
+  display: flex;
+  gap: 10px;
+}
+
+.btnCancel {
+  padding: 9px 18px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-dim);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.btnCancel:hover {
+  background: var(--surface2);
+  color: var(--text);
+}
+
+.btnSave {
+  padding: 9px 22px;
+  border-radius: 8px;
+  border: none;
+  background: linear-gradient(135deg, var(--accent), #a29bfe);
+  color: #fff;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.btnSave:hover {
+  box-shadow: 0 4px 16px var(--accent-glow);
+}
+
+.btnDelete {
+  padding: 9px 18px;
+  border-radius: 8px;
+  border: 1px solid rgba(225, 112, 85, 0.4);
+  background: rgba(225, 112, 85, 0.1);
+  color: var(--red);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.btnDelete:hover {
+  background: rgba(225, 112, 85, 0.2);
+  border-color: var(--red);
+}

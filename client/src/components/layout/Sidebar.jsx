@@ -2,7 +2,7 @@ import { useProjects } from '../../contexts/ProjectContext';
 import { useTasks } from '../../contexts/TaskContext';
 import styles from './Sidebar.module.css';
 
-export default function Sidebar({ collapsed, onToggle }) {
+export default function Sidebar({ collapsed, onToggle, onNewProject, onEditProject }) {
   const { projects, activeProjectId, setActiveProject } = useProjects();
   const { tasks } = useTasks();
 
@@ -23,6 +23,7 @@ export default function Sidebar({ collapsed, onToggle }) {
               key={project.id}
               className={`${styles.projectItem} ${project.id === activeProjectId ? styles.active : ''}`}
               onClick={() => setActiveProject(project.id)}
+              onDoubleClick={() => onEditProject?.(project)}
             >
               <span className={styles.projEmoji}>{project.emoji || '\uD83D\uDCCB'}</span>
               <span className={styles.projName}>{project.name || project.id}</span>
@@ -33,7 +34,12 @@ export default function Sidebar({ collapsed, onToggle }) {
           ))}
         </div>
         <div className={styles.sidebarFooter}>
-          <button className={styles.newProjectBtn}>+ New Project</button>
+          <button
+            className={styles.newProjectBtn}
+            onClick={() => onNewProject?.()}
+          >
+            + New Project
+          </button>
         </div>
       </nav>
 
