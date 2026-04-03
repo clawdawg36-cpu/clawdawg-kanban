@@ -356,10 +356,11 @@
 /* ===== MOBILE STYLES ===== */
 @media (max-width: 768px) {
   .card {
-    padding: 16px;
+    padding: 16px 16px 14px;
     border-radius: 12px;
     cursor: default;
     max-width: 100%;
+    margin: 2px 0;
     overflow: hidden;
     word-break: break-word;
   }
