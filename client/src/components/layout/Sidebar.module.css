@@ -185,7 +185,19 @@
 }
 
 @media (max-width: 768px) {
+  .sidebar {
+    transform: translateX(-220px);
+  }
+
+  .sidebar.mobileOpen {
+    transform: translateX(0);
+  }
+
+  .sidebar.collapsed {
+    transform: translateX(-220px);
+  }
+
   .expandBtn {
-    display: none;
+    display: none !important;
   }
 }

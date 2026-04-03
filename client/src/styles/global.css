@@ -40,6 +40,15 @@ input[type="date"] {
   color-scheme: light;
 }
 
+/* Mobile body */
+@media (max-width: 768px) {
+  body {
+    overflow-x: hidden;
+    -webkit-text-size-adjust: 100%;
+    touch-action: manipulation;
+  }
+}
+
 /* Reduced motion */
 @media (prefers-reduced-motion: reduce) {
   *,

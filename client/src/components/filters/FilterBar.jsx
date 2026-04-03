@@ -1,9 +1,10 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useFilters } from '../../contexts/FilterContext';
 import { useTasks } from '../../contexts/TaskContext';
 import styles from './FilterBar.module.css';
 
 export default function FilterBar() {
+  const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
   const {
     searchQuery, setSearchQuery,
     priorityFilter, setPriorityFilter,
@@ -61,7 +62,16 @@ export default function FilterBar() {
         )}
       </div>
 
-      <div className={styles.filters}>
+      <button
+        className={`${styles.mobileFilterToggle} ${mobileFiltersOpen ? styles.mobileFilterToggleActive : ''}`}
+        onClick={() => setMobileFiltersOpen(prev => !prev)}
+        title="Toggle filters"
+      >
+        &#9776;
+        {hasActiveFilters && <span className={styles.filterActiveDot} />}
+      </button>
+
+      <div className={`${styles.filters} ${mobileFiltersOpen ? styles.filtersExpanded : ''}`}>
         <div className={styles.filterGroup}>
           <span className={styles.filterLabel}>Priority</span>
           <select

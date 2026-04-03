@@ -1,4 +1,4 @@
-import { useMemo, useCallback } from 'react';
+import { useMemo, useCallback, useState, useRef, useEffect } from 'react';
 import { DndContext, DragOverlay, closestCorners, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { useTasks } from '../../contexts/TaskContext';
 import { useFilters } from '../../contexts/FilterContext';
@@ -6,6 +6,20 @@ import Column from './Column';
 import styles from './Board.module.css';
 
 const COL_ORDER = ['idea', 'backlog', 'in-progress', 'in-review', 'done'];
+const COL_LABELS = {
+  'idea': 'Idea',
+  'backlog': 'Backlog',
+  'in-progress': 'In Progress',
+  'in-review': 'In Review',
+  'done': 'Done',
+};
+const COL_DOT_CLASS = {
+  'idea': 'tabDotIdea',
+  'backlog': 'tabDotBacklog',
+  'in-progress': 'tabDotInProgress',
+  'in-review': 'tabDotInReview',
+  'done': 'tabDotDone',
+};
 
 function LoadingSkeleton() {
   const cols = [
@@ -35,13 +49,51 @@ function LoadingSkeleton() {
   );
 }
 
-export default function Board({ onCardClick }) {
+export default function Board({ onCardClick, onAddTask }) {
   const { tasks, loading, error, loadTasks, moveTask, archiveAllDone } = useTasks();
   const { matchesSearch, hasActiveFilters } = useFilters();
+  const [mobileActiveCol, setMobileActiveCol] = useState('backlog');
+  const boardRef = useRef(null);
+  const touchStartRef = useRef(null);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
   );
+
+  // Mobile swipe to switch columns
+  useEffect(() => {
+    const el = boardRef.current;
+    if (!el) return;
+    const SWIPE_THRESHOLD = 50;
+
+    const handleTouchStart = (e) => {
+      touchStartRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+    };
+
+    const handleTouchEnd = (e) => {
+      if (!touchStartRef.current) return;
+      const dx = e.changedTouches[0].clientX - touchStartRef.current.x;
+      const dy = e.changedTouches[0].clientY - touchStartRef.current.y;
+      touchStartRef.current = null;
+
+      // Only horizontal swipes (not scrolling)
+      if (Math.abs(dx) < SWIPE_THRESHOLD || Math.abs(dy) > Math.abs(dx)) return;
+
+      setMobileActiveCol(prev => {
+        const idx = COL_ORDER.indexOf(prev);
+        if (dx < 0 && idx < COL_ORDER.length - 1) return COL_ORDER[idx + 1];
+        if (dx > 0 && idx > 0) return COL_ORDER[idx - 1];
+        return prev;
+      });
+    };
+
+    el.addEventListener('touchstart', handleTouchStart, { passive: true });
+    el.addEventListener('touchend', handleTouchEnd, { passive: true });
+    return () => {
+      el.removeEventListener('touchstart', handleTouchStart);
+      el.removeEventListener('touchend', handleTouchEnd);
+    };
+  }, []);
 
   // Build blocked set (tasks whose non-done blockers exist)
   // For now, we expose the set; dependency loading can be added later
@@ -105,7 +157,22 @@ export default function Board({ onCardClick }) {
       collisionDetection={closestCorners}
       onDragEnd={handleDragEnd}
     >
-      <div className={styles.board}>
+      {/* Mobile column tabs */}
+      <div className={styles.mobileColNav}>
+        {COL_ORDER.map(col => (
+          <button
+            key={col}
+            className={`${styles.mobileColTab} ${mobileActiveCol === col ? styles.mobileColTabActive : ''}`}
+            onClick={() => setMobileActiveCol(col)}
+          >
+            <span className={`${styles.tabDot} ${styles[COL_DOT_CLASS[col]]}`} />
+            <span className={styles.tabLabel}>{COL_LABELS[col]}</span>
+            <span className={styles.tabCount}>{columnTasks[col].length}</span>
+          </button>
+        ))}
+      </div>
+
+      <div className={styles.board} ref={boardRef}>
         {COL_ORDER.map(col => (
           <Column
             key={col}
@@ -115,9 +182,17 @@ export default function Board({ onCardClick }) {
             onArchiveAllDone={col === 'done' ? archiveAllDone : undefined}
             blockedTaskIds={blockedTaskIds}
             hasActiveFilters={hasActiveFilters}
+            mobileActive={mobileActiveCol === col}
           />
         ))}
       </div>
+
+      {/* FAB for mobile */}
+      {onAddTask && (
+        <button className={styles.fab} onClick={onAddTask} title="New task">
+          +
+        </button>
+      )}
     </DndContext>
   );
 }

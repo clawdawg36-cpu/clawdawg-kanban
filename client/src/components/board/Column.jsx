@@ -19,7 +19,7 @@ const PRIORITY_META = {
   low:    { label: 'Low',    emoji: '\uD83D\uDFE2', color: 'var(--green)' },
 };
 
-export default function Column({ columnId, tasks, onCardClick, onArchiveAllDone, blockedTaskIds, hasActiveFilters }) {
+export default function Column({ columnId, tasks, onCardClick, onArchiveAllDone, blockedTaskIds, hasActiveFilters, mobileActive }) {
   const meta = COL_META[columnId] || { label: columnId, dotClass: '' };
 
   const { setNodeRef, isOver } = useDroppable({ id: columnId });
@@ -37,7 +37,7 @@ export default function Column({ columnId, tasks, onCardClick, onArchiveAllDone,
   const taskIds = tasks.map(t => t.id);
 
   return (
-    <div className={styles.column}>
+    <div className={`${styles.column} ${mobileActive ? styles.mobileActive : ''}`}>
       <div className={styles.columnHeader}>
         <span className={styles.columnTitle}>
           <span className={`${styles.columnDot} ${styles[meta.dotClass]}`} />

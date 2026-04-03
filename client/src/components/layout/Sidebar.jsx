@@ -10,7 +10,7 @@ export default function Sidebar({ collapsed, onToggle, onNewProject, onEditProje
 
   return (
     <>
-      <nav className={`${styles.sidebar} ${collapsed ? styles.collapsed : ''}`}>
+      <nav className={`${styles.sidebar} ${collapsed ? styles.collapsed : ''} ${!collapsed ? styles.mobileOpen : ''}`}>
         <div className={styles.sidebarHeader}>
           <h3 className={styles.sidebarTitle}>Projects</h3>
           <button className={styles.toggleBtn} onClick={onToggle} title="Collapse sidebar">

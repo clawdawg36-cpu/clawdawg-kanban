@@ -141,3 +141,39 @@
   background: var(--border);
   opacity: 0.6;
 }
+
+/* ===== MOBILE STYLES ===== */
+@media (max-width: 768px) {
+  .column {
+    display: none;
+    min-width: 0;
+    max-width: 100%;
+    width: 100%;
+    border-radius: 0;
+    border-left: none;
+    border-right: none;
+    border-top: none;
+    flex: none;
+  }
+
+  .mobileActive {
+    display: flex;
+    flex: 1;
+  }
+
+  .columnHeader {
+    display: none;
+  }
+
+  .cardList {
+    padding: 12px 16px;
+    gap: 10px;
+    min-height: 200px;
+  }
+}
+
+@media (max-width: 375px) {
+  .cardList {
+    padding: 10px 12px;
+  }
+}

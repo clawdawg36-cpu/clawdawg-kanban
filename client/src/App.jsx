@@ -100,7 +100,7 @@ function App() {
         />
         <FilterBar />
         {activeView === 'board' && (
-          <Board onCardClick={(task) => openTaskModal(task)} />
+          <Board onCardClick={(task) => openTaskModal(task)} onAddTask={() => openTaskModal()} />
         )}
         {activeView === 'list' && (
           <ListView onTaskClick={(task) => openTaskModal(task)} />

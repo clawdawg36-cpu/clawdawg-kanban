@@ -352,3 +352,21 @@
 .swipeLeft { background: var(--orange); justify-content: flex-end; }
 .swipeDone { background: #00d2a0; justify-content: flex-start; }
 .swipeVisible { opacity: 1; }
+
+/* ===== MOBILE STYLES ===== */
+@media (max-width: 768px) {
+  .card {
+    padding: 16px;
+    border-radius: 12px;
+    cursor: default;
+  }
+
+  .cardTitle {
+    font-size: 15px;
+    padding-right: 60px;
+  }
+
+  .cardDesc {
+    font-size: 13px;
+  }
+}
