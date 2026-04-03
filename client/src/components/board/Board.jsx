@@ -125,14 +125,18 @@ export default function Board({ onCardClick, onAddTask }) {
     const taskId = active.id;
     const overId = over.id;
 
-    // Determine target column
+    // Determine target column and drop index
     let targetCol = null;
+    let overTaskIndex = -1;
     if (COL_ORDER.includes(overId)) {
       targetCol = overId;
     } else {
-      // Dropped over another card — find which column that card is in
       const overTask = tasks.find(t => t.id === overId);
-      if (overTask) targetCol = overTask.column;
+      if (overTask) {
+        targetCol = overTask.column;
+        const colTasks = columnTasks[targetCol] || [];
+        overTaskIndex = colTasks.findIndex(t => t.id === overId);
+      }
     }
 
     if (!targetCol) return;
@@ -140,8 +144,29 @@ export default function Board({ onCardClick, onAddTask }) {
     const draggedTask = tasks.find(t => t.id === taskId);
     if (!draggedTask || draggedTask.column === targetCol) return;
 
-    moveTask(taskId, targetCol);
-  }, [tasks, moveTask]);
+    // Calculate sortOrder based on drop position
+    const targetTasks = (columnTasks[targetCol] || [])
+      .slice()
+      .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
+
+    let sortOrder;
+    if (targetTasks.length === 0) {
+      sortOrder = 0;
+    } else if (overTaskIndex <= 0) {
+      // Dropped at start or on column itself
+      sortOrder = (targetTasks[0].sortOrder ?? 0) - 1;
+    } else if (overTaskIndex >= targetTasks.length - 1) {
+      // Dropped at end
+      sortOrder = (targetTasks[targetTasks.length - 1].sortOrder ?? 0) + 1;
+    } else {
+      // Dropped between two cards
+      const before = targetTasks[overTaskIndex - 1].sortOrder ?? 0;
+      const after = targetTasks[overTaskIndex].sortOrder ?? 0;
+      sortOrder = (before + after) / 2;
+    }
+
+    moveTask(taskId, targetCol, sortOrder);
+  }, [tasks, columnTasks, moveTask]);
 
   if (loading) return <LoadingSkeleton />;
 

@@ -19,10 +19,13 @@ const PRIORITY_META = {
   low:    { label: 'Low',    emoji: '\uD83D\uDFE2', color: 'var(--green)' },
 };
 
-export default function Column({ columnId, tasks, onCardClick, onArchiveTask, onDeleteTask, onArchiveAllDone, blockedTaskIds, hasActiveFilters, mobileActive }) {
+export default function Column({ columnId, tasks: rawTasks, onCardClick, onArchiveTask, onDeleteTask, onArchiveAllDone, blockedTaskIds, hasActiveFilters, mobileActive }) {
   const meta = COL_META[columnId] || { label: columnId, dotClass: '' };
 
   const { setNodeRef, isOver } = useDroppable({ id: columnId });
+
+  // Sort tasks by sortOrder within column
+  const tasks = [...rawTasks].sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
 
   // Group by priority
   const grouped = {};

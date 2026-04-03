@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import {
   listTasks,
   createTask as apiCreateTask,
@@ -82,6 +82,63 @@ export function TaskProvider({ children }) {
     loadTasks();
   }, [loadTasks]);
 
+  // SSE real-time sync
+  const eventSourceRef = useRef(null);
+  const reconnectTimerRef = useRef(null);
+  const backoffRef = useRef(1000);
+
+  useEffect(() => {
+    if (!activeProjectId) return;
+
+    function connect() {
+      if (eventSourceRef.current) {
+        eventSourceRef.current.close();
+      }
+
+      const es = new EventSource(`/api/events?projectId=${activeProjectId}`);
+      eventSourceRef.current = es;
+
+      es.addEventListener('task.updated', (e) => {
+        try {
+          const { task } = JSON.parse(e.data);
+          setTasks(prev => prev.map(t => t.id === task.id ? { ...t, ...task } : t));
+        } catch {}
+      });
+
+      es.addEventListener('task.created', (e) => {
+        try {
+          const { task } = JSON.parse(e.data);
+          setTasks(prev => prev.some(t => t.id === task.id) ? prev : [...prev, task]);
+        } catch {}
+      });
+
+      es.addEventListener('task.deleted', (e) => {
+        try {
+          const { taskId } = JSON.parse(e.data);
+          setTasks(prev => prev.filter(t => t.id !== taskId));
+        } catch {}
+      });
+
+      es.onopen = () => {
+        backoffRef.current = 1000;
+      };
+
+      es.onerror = () => {
+        es.close();
+        const delay = backoffRef.current;
+        backoffRef.current = Math.min(delay * 2, 30000);
+        reconnectTimerRef.current = setTimeout(connect, delay);
+      };
+    }
+
+    connect();
+
+    return () => {
+      if (eventSourceRef.current) eventSourceRef.current.close();
+      if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
+    };
+  }, [activeProjectId]);
+
   const createTask = useCallback(async (data) => {
     const task = await apiCreateTask({ ...data, projectId: activeProjectId });
     setTasks(prev => [...prev, task]);
@@ -99,8 +156,12 @@ export function TaskProvider({ children }) {
     setTasks(prev => prev.filter(t => t.id !== id));
   }, []);
 
-  const moveTask = useCallback(async (id, column) => {
-    const updated = await apiPatchTask(id, { column });
+  const moveTask = useCallback(async (id, column, sortOrder) => {
+    const patchData = { column };
+    if (sortOrder != null) patchData.sortOrder = sortOrder;
+    // Optimistic update
+    setTasks(prev => prev.map(t => t.id === id ? { ...t, ...patchData } : t));
+    const updated = await apiPatchTask(id, patchData);
     setTasks(prev => prev.map(t => t.id === id ? updated : t));
     return updated;
   }, []);

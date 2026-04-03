@@ -1,9 +1,11 @@
 import { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import { listNotifications, markNotificationsRead, deleteNotification as apiDeleteNotification } from '../api/notifications';
+import { useProjects } from './ProjectContext';
 
 const NotificationContext = createContext();
 
 export function NotificationProvider({ children }) {
+  const { activeProjectId } = useProjects();
   const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const intervalRef = useRef(null);
@@ -24,6 +26,22 @@ export function NotificationProvider({ children }) {
     intervalRef.current = setInterval(loadNotifications, 30000);
     return () => clearInterval(intervalRef.current);
   }, [loadNotifications]);
+
+  // SSE: reload notifications when task events arrive
+  useEffect(() => {
+    if (!activeProjectId) return;
+
+    const es = new EventSource(`/api/events?projectId=${activeProjectId}`);
+
+    const handleTaskEvent = () => loadNotifications();
+    es.addEventListener('task.updated', handleTaskEvent);
+    es.addEventListener('task.created', handleTaskEvent);
+    es.addEventListener('log.created', handleTaskEvent);
+
+    es.onerror = () => es.close();
+
+    return () => es.close();
+  }, [activeProjectId, loadNotifications]);
 
   const markAllRead = useCallback(async () => {
     try {
