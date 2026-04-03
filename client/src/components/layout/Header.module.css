@@ -201,6 +201,115 @@
   display: none;
 }
 
+/* Notification dropdown */
+.notifWrap {
+  position: relative;
+}
+
+.notifDropdown {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  width: 360px;
+  max-height: 400px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 12px 40px rgba(0,0,0,0.3);
+  z-index: 200;
+  overflow: hidden;
+  animation: dropIn 0.15s ease;
+}
+
+@keyframes dropIn {
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.notifHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.notifMarkRead {
+  background: none;
+  border: none;
+  color: var(--accent);
+  font-size: 12px;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.notifMarkRead:hover {
+  text-decoration: underline;
+}
+
+.notifList {
+  max-height: 340px;
+  overflow-y: auto;
+}
+
+.notifItem {
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  cursor: default;
+  transition: background var(--transition);
+}
+
+.notifItem:hover {
+  background: var(--surface2);
+}
+
+.notifUnread {
+  background: var(--accent-glow);
+}
+
+.notifText {
+  font-size: 13px;
+  color: var(--text);
+  line-height: 1.4;
+}
+
+.notifText strong {
+  font-weight: 600;
+}
+
+.notifText span {
+  color: var(--text-dim);
+}
+
+.notifMeta {
+  display: flex;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-top: 4px;
+}
+
+.notifEmpty {
+  padding: 24px 16px;
+  text-align: center;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+@media (max-width: 768px) {
+  .notifDropdown {
+    position: fixed;
+    top: 60px;
+    right: 8px;
+    left: 8px;
+    width: auto;
+    max-height: 60vh;
+  }
+}
+
 @media (max-width: 768px) {
   .header {
     padding: 14px 16px;

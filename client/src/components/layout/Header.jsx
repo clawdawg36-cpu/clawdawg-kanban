@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useProjects } from '../../contexts/ProjectContext';
 import { useFilters } from '../../contexts/FilterContext';
 import { useNotifications } from '../../contexts/NotificationContext';
@@ -8,10 +8,23 @@ import styles from './Header.module.css';
 export default function Header({ onToggleSidebar, onToggleStats, activeView, onViewChange, onAddTask }) {
   const { activeProject } = useProjects();
   const { setSearchQuery } = useFilters();
-  const { unreadCount } = useNotifications();
+  const { notifications, unreadCount, markAllRead } = useNotifications();
   const { theme, toggleTheme } = useTheme();
 
   const [localSearch, setLocalSearch] = useState('');
+  const [notifOpen, setNotifOpen] = useState(false);
+  const notifRef = useRef(null);
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClick = (e) => {
+      if (notifRef.current && !notifRef.current.contains(e.target)) {
+        setNotifOpen(false);
+      }
+    };
+    if (notifOpen) document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [notifOpen]);
 
   const handleSearchChange = (e) => {
     setLocalSearch(e.target.value);
@@ -58,16 +71,44 @@ export default function Header({ onToggleSidebar, onToggleStats, activeView, onV
             </button>
           ))}
         </div>
-        <button
-          className={styles.iconBtn}
-          onClick={() => {}}
-          title="Notifications"
-        >
-          &#128276;
-          {unreadCount > 0 && (
-            <span className={styles.notifBadge}>{unreadCount}</span>
+        <div className={styles.notifWrap} ref={notifRef}>
+          <button
+            className={styles.iconBtn}
+            onClick={() => setNotifOpen(prev => !prev)}
+            title="Notifications"
+          >
+            &#128276;
+            {unreadCount > 0 && (
+              <span className={styles.notifBadge}>{unreadCount}</span>
+            )}
+          </button>
+          {notifOpen && (
+            <div className={styles.notifDropdown}>
+              <div className={styles.notifHeader}>
+                <span>Notifications</span>
+                {unreadCount > 0 && (
+                  <button className={styles.notifMarkRead} onClick={() => { markAllRead(); }}>Mark all read</button>
+                )}
+              </div>
+              <div className={styles.notifList}>
+                {notifications.length === 0 ? (
+                  <div className={styles.notifEmpty}>No notifications</div>
+                ) : notifications.slice(0, 20).map(n => (
+                  <div key={n.id} className={`${styles.notifItem} ${!n.is_read && !n.read ? styles.notifUnread : ''}`}>
+                    <div className={styles.notifText}>
+                      <strong>{n.task_title}</strong>
+                      <span> moved from {n.from_col} → {n.to_col}</span>
+                    </div>
+                    <div className={styles.notifMeta}>
+                      <span>{n.changed_by}</span>
+                      <span>{new Date(n.created_at).toLocaleDateString()}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
           )}
-        </button>
+        </div>
         <button
           className={styles.iconBtn}
           onClick={toggleTheme}

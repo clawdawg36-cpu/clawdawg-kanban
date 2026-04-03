@@ -47,8 +47,8 @@ export function FilterProvider({ children }) {
       if (agentCol !== agentStatusFilter) return false;
     }
     if (showBlocked) {
-      // Blocked check is done externally since it needs dependency data
-      // This flag is just exposed; Board component handles the logic
+      const blockers = Array.isArray(task.blockedBy) ? task.blockedBy : [];
+      if (blockers.length === 0) return false;
     }
     if (showOverdue) {
       if (!task.dueDate) return false;

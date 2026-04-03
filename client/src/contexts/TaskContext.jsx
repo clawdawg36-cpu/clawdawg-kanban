@@ -16,6 +16,8 @@ const TaskContext = createContext();
 export function TaskProvider({ children }) {
   const { activeProjectId } = useProjects();
   const [tasks, setTasks] = useState([]);
+  const [archivedTasks, setArchivedTasks] = useState([]);
+  const [showingArchived, setShowingArchived] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -58,6 +60,23 @@ export function TaskProvider({ children }) {
       setLoading(false);
     }
   }, [activeProjectId]);
+
+  const loadArchivedTasks = useCallback(async () => {
+    if (!activeProjectId) return;
+    try {
+      const data = await listTasks({ projectId: activeProjectId, archived: 'true', limit: 200 });
+      const items = Array.isArray(data) ? data : (data.items || []);
+      setArchivedTasks(items);
+    } catch (err) {
+      console.error('Failed to load archived tasks:', err);
+    }
+  }, [activeProjectId]);
+
+  const toggleArchived = useCallback(async () => {
+    const next = !showingArchived;
+    setShowingArchived(next);
+    if (next) await loadArchivedTasks();
+  }, [showingArchived, loadArchivedTasks]);
 
   useEffect(() => {
     loadTasks();
@@ -112,10 +131,14 @@ export function TaskProvider({ children }) {
 
   return (
     <TaskContext.Provider value={{
-      tasks,
+      tasks: showingArchived ? archivedTasks : tasks,
+      allTasks: tasks,
+      archivedTasks,
+      showingArchived,
       loading,
       error,
       loadTasks,
+      toggleArchived,
       createTask,
       updateTask,
       deleteTask,

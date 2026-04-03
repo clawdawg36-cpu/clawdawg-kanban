@@ -13,7 +13,7 @@ export function NotificationProvider({ children }) {
       const data = await listNotifications();
       const list = Array.isArray(data) ? data : (data.items || []);
       setNotifications(list);
-      setUnreadCount(list.filter(n => !n.read).length);
+      setUnreadCount(list.filter(n => !n.is_read && !n.read).length);
     } catch (err) {
       console.error('Failed to load notifications:', err);
     }
@@ -28,7 +28,7 @@ export function NotificationProvider({ children }) {
   const markAllRead = useCallback(async () => {
     try {
       await markNotificationsRead();
-      setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+      setNotifications(prev => prev.map(n => ({ ...n, is_read: 1, read: true })));
       setUnreadCount(0);
     } catch (err) {
       console.error('Failed to mark notifications read:', err);
@@ -40,7 +40,7 @@ export function NotificationProvider({ children }) {
       await apiDeleteNotification(id);
       setNotifications(prev => {
         const updated = prev.filter(n => n.id !== id);
-        setUnreadCount(updated.filter(n => !n.read).length);
+        setUnreadCount(updated.filter(n => !n.is_read && !n.read).length);
         return updated;
       });
     } catch (err) {

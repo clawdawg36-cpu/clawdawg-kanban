@@ -19,7 +19,7 @@ export default function FilterBar() {
     matchesSearch,
   } = useFilters();
 
-  const { tasks } = useTasks();
+  const { tasks, showingArchived, toggleArchived } = useTasks();
 
   // Derive unique assignees from tasks
   const assignees = useMemo(() => {
@@ -45,7 +45,7 @@ export default function FilterBar() {
         <input
           type="text"
           className={styles.searchInput}
-          placeholder="Search title, description, tag, assignee\u2026"
+          placeholder="Search title, description, tag, assignee…"
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           autoComplete="off"
@@ -147,8 +147,8 @@ export default function FilterBar() {
             &#9888;&#65039; Overdue
           </button>
           <button
-            className={`${styles.toggleBtn} ${showArchived ? styles.toggleBtnActive : ''}`}
-            onClick={() => setShowArchived(!showArchived)}
+            className={`${styles.toggleBtn} ${showingArchived ? styles.toggleBtnActive : ''}`}
+            onClick={toggleArchived}
             title="Show archived tasks"
           >
             &#128230; Archived
