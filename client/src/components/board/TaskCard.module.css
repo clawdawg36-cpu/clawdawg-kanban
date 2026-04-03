@@ -359,14 +359,33 @@
     padding: 16px;
     border-radius: 12px;
     cursor: default;
+    max-width: 100%;
+    overflow: hidden;
+    word-break: break-word;
   }
 
   .cardTitle {
     font-size: 15px;
-    padding-right: 60px;
+    padding-right: 0;
+    word-break: break-word;
+    overflow-wrap: anywhere;
   }
 
   .cardDesc {
     font-size: 13px;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+  }
+
+  .cardTags {
+    max-width: 100%;
+    overflow: hidden;
+  }
+
+  .tag {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 }

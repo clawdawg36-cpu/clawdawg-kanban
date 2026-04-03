@@ -13,6 +13,13 @@ const COL_LABELS = {
   'in-review': 'In Review',
   'done': 'Done',
 };
+const COL_LABELS_MOBILE = {
+  'idea': 'Idea',
+  'backlog': 'Backlog',
+  'in-progress': 'In Prog',
+  'in-review': 'Review',
+  'done': 'Done',
+};
 const COL_DOT_CLASS = {
   'idea': 'tabDotIdea',
   'backlog': 'tabDotBacklog',
@@ -166,7 +173,7 @@ export default function Board({ onCardClick, onAddTask }) {
             onClick={() => setMobileActiveCol(col)}
           >
             <span className={`${styles.tabDot} ${styles[COL_DOT_CLASS[col]]}`} />
-            <span className={styles.tabLabel}>{COL_LABELS[col]}</span>
+            <span className={styles.tabLabel}>{COL_LABELS_MOBILE[col]}</span>
             <span className={styles.tabCount}>{columnTasks[col].length}</span>
           </button>
         ))}
