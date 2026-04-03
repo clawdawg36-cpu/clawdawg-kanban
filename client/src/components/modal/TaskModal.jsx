@@ -144,13 +144,11 @@ export default function TaskModal({ task, onClose }) {
     if (tpl) {
       setForm(prev => ({
         ...prev,
-        title: tpl.title || prev.title,
-        description: tpl.description || prev.description,
-        assignee: tpl.assignee || prev.assignee,
-        priority: tpl.priority || prev.priority,
-        column: tpl.column || prev.column,
-        tags: tpl.tags || prev.tags,
-        subtasks: tpl.subtasks || prev.subtasks,
+        description: tpl.defaultDescription || prev.description,
+        assignee: tpl.defaultAssignee || prev.assignee,
+        priority: tpl.defaultPriority || prev.priority,
+        column: tpl.defaultColumn || prev.column,
+        tags: tpl.defaultTags || prev.tags,
       }));
     }
   };
