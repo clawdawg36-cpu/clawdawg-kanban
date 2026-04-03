@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useProjects } from '../../contexts/ProjectContext';
 import styles from './StatsPanel.module.css';
 
@@ -19,6 +19,125 @@ function formatDuration(ms) {
   if (hours > 0) return `${hours}h`;
   const mins = Math.floor(ms / 60000);
   return `${mins}m`;
+}
+
+function VelocityChart({ projectId }) {
+  const [timeline, setTimeline] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!projectId) return;
+    setLoading(true);
+    fetch(`/api/projects/${encodeURIComponent(projectId)}/timeline?days=30`)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => setTimeline(data))
+      .catch(() => setTimeline(null))
+      .finally(() => setLoading(false));
+  }, [projectId]);
+
+  const chartData = useMemo(() => {
+    if (!timeline) return null;
+
+    // Build a full 30-day array
+    const days = [];
+    const now = new Date();
+    const todayStr = now.toISOString().slice(0, 10);
+
+    for (let i = 29; i >= 0; i--) {
+      const d = new Date(now);
+      d.setDate(d.getDate() - i);
+      const dateStr = d.toISOString().slice(0, 10);
+      days.push({ date: dateStr, completed: 0, dayOfWeek: d.getDay() });
+    }
+
+    // Fill in actual data
+    const dataMap = {};
+    (timeline.items || []).forEach(item => { dataMap[item.date] = item.completed; });
+    days.forEach(d => { d.completed = dataMap[d.date] || 0; });
+
+    const maxVal = Math.max(1, ...days.map(d => d.completed));
+
+    return { days, maxVal, todayStr };
+  }, [timeline]);
+
+  if (loading) return <div className={styles.loadingMsg}>Loading chart...</div>;
+  if (!chartData || chartData.days.every(d => d.completed === 0)) {
+    return <div className={styles.emptyChart}>No completed tasks in the last 30 days</div>;
+  }
+
+  const { days, maxVal, todayStr } = chartData;
+  const W = 420;
+  const H = 140;
+  const padLeft = 30;
+  const padBottom = 24;
+  const padTop = 10;
+  const padRight = 10;
+  const chartW = W - padLeft - padRight;
+  const chartH = H - padTop - padBottom;
+  const barW = Math.max(4, (chartW / days.length) - 2);
+
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} className={styles.chart}>
+      {/* Y-axis labels */}
+      <text x={padLeft - 4} y={padTop + 4} className={styles.axisLabel} textAnchor="end">{maxVal}</text>
+      <text x={padLeft - 4} y={padTop + chartH} className={styles.axisLabel} textAnchor="end">0</text>
+
+      {/* Grid lines */}
+      <line x1={padLeft} y1={padTop} x2={padLeft + chartW} y2={padTop} className={styles.gridLine} />
+      <line x1={padLeft} y1={padTop + chartH} x2={padLeft + chartW} y2={padTop + chartH} className={styles.gridLine} />
+      {maxVal > 2 && (
+        <line
+          x1={padLeft} y1={padTop + chartH / 2}
+          x2={padLeft + chartW} y2={padTop + chartH / 2}
+          className={styles.gridLine}
+          strokeDasharray="4 4"
+        />
+      )}
+
+      {/* Bars */}
+      {days.map((d, i) => {
+        const x = padLeft + (i / days.length) * chartW + 1;
+        const barH = d.completed > 0 ? Math.max(2, (d.completed / maxVal) * chartH) : 0;
+        const y = padTop + chartH - barH;
+        const isToday = d.date === todayStr;
+
+        return (
+          <g key={d.date}>
+            {barH > 0 && (
+              <rect
+                x={x}
+                y={y}
+                width={barW}
+                height={barH}
+                rx={2}
+                className={isToday ? styles.barToday : styles.bar}
+              />
+            )}
+            {isToday && (
+              <line
+                x1={x + barW / 2} y1={padTop}
+                x2={x + barW / 2} y2={padTop + chartH}
+                className={styles.todayLine}
+              />
+            )}
+          </g>
+        );
+      })}
+
+      {/* X-axis week markers */}
+      {days.map((d, i) => {
+        // Show a label every 7 days
+        if (i % 7 !== 0 && i !== days.length - 1) return null;
+        const x = padLeft + (i / days.length) * chartW + barW / 2;
+        const label = d.date.slice(5); // MM-DD
+        return (
+          <text key={d.date} x={x} y={H - 4} className={styles.axisLabel} textAnchor="middle">
+            {label}
+          </text>
+        );
+      })}
+    </svg>
+  );
 }
 
 export default function StatsPanel({ open, onClose }) {
@@ -124,6 +243,12 @@ export default function StatsPanel({ open, onClose }) {
                   <span className={styles.label} style={{ color: 'var(--text-dim)' }}>No tasks yet</span>
                 </div>
               )}
+            </div>
+
+            {/* Velocity chart */}
+            <div className={styles.group}>
+              <h3 className={styles.groupTitle}>Velocity (last 30 days)</h3>
+              <VelocityChart projectId={activeProjectId} />
             </div>
           </>
         )}

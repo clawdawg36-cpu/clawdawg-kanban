@@ -1,9 +1,27 @@
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
+import { useTasks } from '../../contexts/TaskContext';
 import styles from './TaskCard.module.css';
 
 const PRIORITY_LABELS = { urgent: 'Urgent', high: 'High', medium: 'Medium', low: 'Low' };
 const PRIORITY_ICONS = { urgent: '\uD83D\uDD34', high: '\uD83D\uDFE0', medium: '\uD83D\uDD35', low: '\uD83D\uDFE2' };
+
+const COL_ORDER = ['idea', 'backlog', 'in-progress', 'in-review', 'done'];
+const COL_ABBREV = {
+  'idea': 'IDEA',
+  'backlog': 'BL',
+  'in-progress': 'IP',
+  'in-review': 'IR',
+  'done': 'DONE',
+};
+const COL_LABELS = {
+  'idea': 'Idea',
+  'backlog': 'Backlog',
+  'in-progress': 'In Progress',
+  'in-review': 'In Review',
+  'done': 'Done',
+};
 
 function getDueBadge(dueDate, column) {
   if (!dueDate || column === 'done') return null;
@@ -50,6 +68,11 @@ function getInitials(name) {
 }
 
 export default function TaskCard({ task, onClick, isBlocked, onArchive, onDelete }) {
+  const { moveTask } = useTasks();
+  const [showColMenu, setShowColMenu] = useState(false);
+  const colMenuRef = useRef(null);
+  const longPressRef = useRef(null);
+
   const {
     attributes,
     listeners,
@@ -88,6 +111,58 @@ export default function TaskCard({ task, onClick, isBlocked, onArchive, onDelete
     task.archived && styles.archivedCard,
   ].filter(Boolean).join(' ');
 
+  // Column pill: cycle to next column on click
+  const handlePillClick = useCallback((e) => {
+    e.stopPropagation();
+    const idx = COL_ORDER.indexOf(task.column);
+    const nextIdx = (idx + 1) % COL_ORDER.length;
+    moveTask(task.id, COL_ORDER[nextIdx]);
+  }, [task.id, task.column, moveTask]);
+
+  // Column pill: show dropdown on right-click or long-press
+  const handlePillContext = useCallback((e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setShowColMenu(prev => !prev);
+  }, []);
+
+  const handlePillTouchStart = useCallback((e) => {
+    longPressRef.current = setTimeout(() => {
+      e.stopPropagation();
+      setShowColMenu(true);
+    }, 500);
+  }, []);
+
+  const handlePillTouchEnd = useCallback(() => {
+    clearTimeout(longPressRef.current);
+  }, []);
+
+  const handleColSelect = useCallback((e, col) => {
+    e.stopPropagation();
+    if (col !== task.column) {
+      moveTask(task.id, col);
+    }
+    setShowColMenu(false);
+  }, [task.id, task.column, moveTask]);
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    if (!showColMenu) return;
+    const handleClick = (e) => {
+      if (colMenuRef.current && !colMenuRef.current.contains(e.target)) {
+        setShowColMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClick);
+    document.addEventListener('touchstart', handleClick);
+    return () => {
+      document.removeEventListener('mousedown', handleClick);
+      document.removeEventListener('touchstart', handleClick);
+    };
+  }, [showColMenu]);
+
+  const pillColorClass = styles[`pill${task.column === 'idea' ? 'Idea' : task.column === 'backlog' ? 'Backlog' : task.column === 'in-progress' ? 'InProgress' : task.column === 'in-review' ? 'InReview' : 'Done'}`];
+
   return (
     <div
       ref={setNodeRef}
@@ -101,7 +176,7 @@ export default function TaskCard({ task, onClick, isBlocked, onArchive, onDelete
 
       {isBlocked && (
         <div className={styles.blockedBanner}>
-          <span>\uD83D\uDD12</span> Blocked
+          <span>{'\uD83D\uDD12'}</span> Blocked
         </div>
       )}
 
@@ -168,6 +243,34 @@ export default function TaskCard({ task, onClick, isBlocked, onArchive, onDelete
           <span className={styles.cardDate}>
             {new Date(task.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
           </span>
+        )}
+      </div>
+
+      {/* Column quick-change pill */}
+      <div className={styles.pillWrapper} ref={colMenuRef}>
+        <button
+          className={`${styles.colPill} ${pillColorClass}`}
+          onClick={handlePillClick}
+          onContextMenu={handlePillContext}
+          onTouchStart={handlePillTouchStart}
+          onTouchEnd={handlePillTouchEnd}
+          title={`${COL_LABELS[task.column]} — click to advance, right-click to pick`}
+        >
+          {COL_ABBREV[task.column] || task.column}
+        </button>
+        {showColMenu && (
+          <div className={styles.colDropdown}>
+            {COL_ORDER.map(col => (
+              <button
+                key={col}
+                className={`${styles.colDropdownItem} ${col === task.column ? styles.colDropdownActive : ''}`}
+                onClick={(e) => handleColSelect(e, col)}
+              >
+                <span className={`${styles.colDropdownDot} ${styles[`pill${col === 'idea' ? 'Idea' : col === 'backlog' ? 'Backlog' : col === 'in-progress' ? 'InProgress' : col === 'in-review' ? 'InReview' : 'Done'}`]}`} />
+                {COL_LABELS[col]}
+              </button>
+            ))}
+          </div>
         )}
       </div>
 

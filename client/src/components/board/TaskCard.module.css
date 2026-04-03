@@ -335,6 +335,132 @@
   border-color: var(--red);
 }
 
+/* ─── Column quick-change pill ──────────────────────────────────────────────── */
+.pillWrapper {
+  position: absolute;
+  bottom: 10px;
+  right: 10px;
+  z-index: 2;
+}
+
+.colPill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 2px 7px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: 0.15s ease;
+  text-transform: uppercase;
+  line-height: 1.4;
+  opacity: 0.55;
+  background: rgba(255,255,255,0.06);
+  color: var(--text-dim);
+}
+
+.card:hover .colPill {
+  opacity: 1;
+}
+
+.colPill:hover {
+  transform: scale(1.08);
+}
+
+/* Column-specific pill colors */
+.pillIdea {
+  background: rgba(162, 155, 254, 0.15);
+  color: #a29bfe;
+  border-color: rgba(162, 155, 254, 0.3);
+}
+
+.pillBacklog {
+  background: rgba(139, 143, 167, 0.15);
+  color: var(--text-dim);
+  border-color: rgba(139, 143, 167, 0.3);
+}
+
+.pillInProgress {
+  background: rgba(116, 185, 255, 0.15);
+  color: var(--blue);
+  border-color: rgba(116, 185, 255, 0.3);
+}
+
+.pillInReview {
+  background: rgba(253, 203, 110, 0.15);
+  color: var(--orange);
+  border-color: rgba(253, 203, 110, 0.3);
+}
+
+.pillDone {
+  background: rgba(0, 184, 148, 0.15);
+  color: var(--green);
+  border-color: rgba(0, 184, 148, 0.3);
+}
+
+/* Column dropdown menu */
+.colDropdown {
+  position: absolute;
+  bottom: 100%;
+  right: 0;
+  margin-bottom: 4px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+  padding: 4px;
+  min-width: 140px;
+  z-index: 10;
+  animation: pillMenuIn 0.15s ease;
+}
+
+[data-theme="light"] .colDropdown {
+  box-shadow: 0 8px 24px rgba(0,0,0,0.15);
+}
+
+@keyframes pillMenuIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+
+.colDropdownItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 10px;
+  border: none;
+  background: none;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+  border-radius: 5px;
+  transition: background 0.1s ease;
+  text-align: left;
+}
+
+.colDropdownItem:hover {
+  background: var(--surface2);
+}
+
+.colDropdownActive {
+  background: rgba(108, 92, 231, 0.12);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.colDropdownDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
 /* ─── Card lifecycle animations ─────────────────────────────────────────────── */
 @keyframes cardEnter {
   0% { opacity: 0; transform: scale(0.95); }
@@ -413,6 +539,12 @@
     width: 34px;
     height: 34px;
     font-size: 15px;
+  }
+
+  .colPill {
+    opacity: 0.8;
+    font-size: 10px;
+    padding: 3px 9px;
   }
 
   .cardTitle {

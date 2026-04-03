@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useTasks } from '../../contexts/TaskContext';
 import { listTemplates } from '../../api/templates';
+import useUndoDelete from '../../hooks/useUndoDelete';
 import TagEditor from './TagEditor';
 import Checklist from './Checklist';
 import Dependencies from './Dependencies';
@@ -27,7 +28,8 @@ const PRIORITIES = [
 ];
 
 export default function TaskModal({ task, onClose }) {
-  const { createTask, updateTask, deleteTask, tasks } = useTasks();
+  const { createTask, updateTask, tasks } = useTasks();
+  const { requestDelete } = useUndoDelete();
   const isEditing = !!task?.id;
 
   const [form, setForm] = useState({
@@ -192,14 +194,9 @@ export default function TaskModal({ task, onClose }) {
     }
   };
 
-  const handleDelete = async () => {
-    try {
-      await deleteTask(task.id);
-      onClose();
-    } catch (err) {
-      setError(err.message || 'Failed to delete task.');
-      setShowDeleteConfirm(false);
-    }
+  const handleDelete = () => {
+    requestDelete(task.id);
+    onClose();
   };
 
   return (

@@ -2,6 +2,7 @@ import { useMemo, useCallback, useState, useRef, useEffect } from 'react';
 import { DndContext, DragOverlay, closestCorners, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { useTasks } from '../../contexts/TaskContext';
 import { useFilters } from '../../contexts/FilterContext';
+import useUndoDelete from '../../hooks/useUndoDelete';
 import Column from './Column';
 import styles from './Board.module.css';
 
@@ -57,8 +58,9 @@ function LoadingSkeleton() {
 }
 
 export default function Board({ onCardClick, onAddTask }) {
-  const { tasks, loading, error, loadTasks, moveTask, archiveTask, deleteTask, archiveAllDone } = useTasks();
+  const { tasks, loading, error, loadTasks, moveTask, archiveTask, archiveAllDone } = useTasks();
   const { matchesSearch, hasActiveFilters } = useFilters();
+  const { requestDelete } = useUndoDelete();
   const [mobileActiveCol, setMobileActiveCol] = useState('backlog');
   const boardRef = useRef(null);
   const touchStartRef = useRef(null);
@@ -212,7 +214,7 @@ export default function Board({ onCardClick, onAddTask }) {
             tasks={columnTasks[col]}
             onCardClick={onCardClick}
             onArchiveTask={archiveTask}
-            onDeleteTask={deleteTask}
+            onDeleteTask={requestDelete}
             onArchiveAllDone={col === 'done' ? archiveAllDone : undefined}
             blockedTaskIds={blockedTaskIds}
             hasActiveFilters={hasActiveFilters}

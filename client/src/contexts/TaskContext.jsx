@@ -190,6 +190,16 @@ export function TaskProvider({ children }) {
     return result;
   }, [activeProjectId, loadTasks]);
 
+  // Optimistic local-only removal (no API call) for undo-delete flow
+  const removeTaskLocally = useCallback((id) => {
+    setTasks(prev => prev.filter(t => t.id !== id));
+  }, []);
+
+  // Restore a task object back into local state (no API call)
+  const restoreTask = useCallback((task) => {
+    setTasks(prev => prev.some(t => t.id === task.id) ? prev : [...prev, task]);
+  }, []);
+
   return (
     <TaskContext.Provider value={{
       tasks: showingArchived ? archivedTasks : tasks,
@@ -208,6 +218,8 @@ export function TaskProvider({ children }) {
       archiveTask,
       unarchiveTask,
       archiveAllDone,
+      removeTaskLocally,
+      restoreTask,
     }}>
       {children}
     </TaskContext.Provider>

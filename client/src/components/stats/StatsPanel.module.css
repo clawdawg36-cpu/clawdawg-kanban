@@ -146,3 +146,50 @@
   background: var(--surface2);
   color: var(--text);
 }
+
+/* Velocity chart */
+.chart {
+  width: 100%;
+  height: auto;
+  display: block;
+  margin-top: 8px;
+}
+
+.bar {
+  fill: var(--accent, #6c5ce7);
+  opacity: 0.8;
+}
+
+.bar:hover {
+  opacity: 1;
+}
+
+.barToday {
+  fill: var(--green, #00b894);
+  opacity: 1;
+}
+
+.todayLine {
+  stroke: var(--green, #00b894);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+  opacity: 0.4;
+}
+
+.gridLine {
+  stroke: var(--border, #2e3347);
+  stroke-width: 0.5;
+}
+
+.axisLabel {
+  fill: var(--text-dim, #8b8fa7);
+  font-size: 9px;
+  font-family: inherit;
+}
+
+.emptyChart {
+  text-align: center;
+  padding: 20px 12px;
+  color: var(--text-dim);
+  font-size: 13px;
+}
