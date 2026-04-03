@@ -57,7 +57,7 @@ function LoadingSkeleton() {
 }
 
 export default function Board({ onCardClick, onAddTask }) {
-  const { tasks, loading, error, loadTasks, moveTask, archiveAllDone } = useTasks();
+  const { tasks, loading, error, loadTasks, moveTask, archiveTask, deleteTask, archiveAllDone } = useTasks();
   const { matchesSearch, hasActiveFilters } = useFilters();
   const [mobileActiveCol, setMobileActiveCol] = useState('backlog');
   const boardRef = useRef(null);
@@ -186,6 +186,8 @@ export default function Board({ onCardClick, onAddTask }) {
             columnId={col}
             tasks={columnTasks[col]}
             onCardClick={onCardClick}
+            onArchiveTask={archiveTask}
+            onDeleteTask={deleteTask}
             onArchiveAllDone={col === 'done' ? archiveAllDone : undefined}
             blockedTaskIds={blockedTaskIds}
             hasActiveFilters={hasActiveFilters}

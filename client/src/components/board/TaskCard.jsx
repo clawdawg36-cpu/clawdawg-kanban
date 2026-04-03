@@ -49,7 +49,7 @@ function getInitials(name) {
   return name.charAt(0).toUpperCase();
 }
 
-export default function TaskCard({ task, onClick, isBlocked }) {
+export default function TaskCard({ task, onClick, isBlocked, onArchive, onDelete }) {
   const {
     attributes,
     listeners,
@@ -168,6 +168,27 @@ export default function TaskCard({ task, onClick, isBlocked }) {
           <span className={styles.cardDate}>
             {new Date(task.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
           </span>
+        )}
+      </div>
+
+      <div className={styles.cardActions}>
+        {onArchive && (
+          <button
+            className={styles.cardActionBtn}
+            onClick={(e) => { e.stopPropagation(); onArchive(task.id); }}
+            title="Archive"
+          >
+            &#128230;
+          </button>
+        )}
+        {onDelete && (
+          <button
+            className={`${styles.cardActionBtn} ${styles.cardActionDelete}`}
+            onClick={(e) => { e.stopPropagation(); onDelete(task.id); }}
+            title="Delete"
+          >
+            &#128465;
+          </button>
         )}
       </div>
     </div>

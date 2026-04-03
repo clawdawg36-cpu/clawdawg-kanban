@@ -19,7 +19,7 @@ const PRIORITY_META = {
   low:    { label: 'Low',    emoji: '\uD83D\uDFE2', color: 'var(--green)' },
 };
 
-export default function Column({ columnId, tasks, onCardClick, onArchiveAllDone, blockedTaskIds, hasActiveFilters, mobileActive }) {
+export default function Column({ columnId, tasks, onCardClick, onArchiveTask, onDeleteTask, onArchiveAllDone, blockedTaskIds, hasActiveFilters, mobileActive }) {
   const meta = COL_META[columnId] || { label: columnId, dotClass: '' };
 
   const { setNodeRef, isOver } = useDroppable({ id: columnId });
@@ -86,6 +86,8 @@ export default function Column({ columnId, tasks, onCardClick, onArchiveAllDone,
                       task={task}
                       onClick={onCardClick}
                       isBlocked={blockedTaskIds?.has(task.id)}
+                      onArchive={onArchiveTask}
+                      onDelete={onDeleteTask}
                     />
                   ))}
                 </div>
@@ -98,6 +100,8 @@ export default function Column({ columnId, tasks, onCardClick, onArchiveAllDone,
                 task={task}
                 onClick={onCardClick}
                 isBlocked={blockedTaskIds?.has(task.id)}
+                onArchive={onArchiveTask}
+                onDelete={onDeleteTask}
               />
             ))
           )}
