@@ -293,7 +293,7 @@ export default function TaskModal({ task, onClose }) {
           </div>
         </div>
 
-        {/* Start After + Recurring + Hint */}
+        {/* Start After + Recurring */}
         <div className={styles.fieldRow}>
           <div className={styles.field}>
             <label>Starts After</label>
@@ -309,7 +309,7 @@ export default function TaskModal({ task, onClose }) {
               type="text"
               value={form.recurring}
               onChange={(e) => setField('recurring', e.target.value)}
-              placeholder="daily, weekly, monthly, every:Xh"
+              placeholder="daily, weekly, every:Xh"
               list="recurringOptions"
             />
             <datalist id="recurringOptions">
@@ -319,11 +319,6 @@ export default function TaskModal({ task, onClose }) {
               <option value="every:12h" />
               <option value="every:3d" />
             </datalist>
-          </div>
-          <div className={`${styles.field} ${styles.recurringHint}`}>
-            <small className={styles.recurringHintText}>
-              Completing this task auto-respawns it with a startAfter delay matching the interval.
-            </small>
           </div>
         </div>
 

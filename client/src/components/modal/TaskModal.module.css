@@ -96,10 +96,14 @@
 .fieldRow {
   display: flex;
   gap: 12px;
+  max-width: 100%;
+  overflow: hidden;
 }
 
 .fieldRow .field {
   flex: 1;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .recurringHint {
