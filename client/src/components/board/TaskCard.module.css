@@ -547,6 +547,15 @@
     padding: 3px 9px;
   }
 
+  .cardDate {
+    display: none;
+  }
+
+  .cardMeta {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
   .cardTitle {
     font-size: 15px;
     padding-right: 80px;
