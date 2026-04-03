@@ -1,0 +1,27 @@
+.appWrapper {
+  display: flex;
+  min-height: 100vh;
+}
+
+.appContent {
+  margin-left: 220px;
+  flex: 1;
+  transition: margin-left 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.sidebarCollapsed {
+  margin-left: 0;
+}
+
+@media (max-width: 768px) {
+  .appWrapper {
+    max-width: 100vw;
+    overflow-x: hidden;
+  }
+
+  .appContent {
+    margin-left: 0;
+    max-width: 100vw;
+    overflow-x: hidden;
+  }
+}
